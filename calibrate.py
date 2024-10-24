@@ -49,7 +49,7 @@ for camera in cameras:
     focus_supported = cap.set(cv2.CAP_PROP_FOCUS, camera["focus"])
     if not focus_supported:
         print(
-            f"Camera {camera['index']} does not support manual focus! (or a invalid focus value provided)",
+            f"Camera {camera['index']} does not support manual focus! (or an invalid focus value provided)",
             file=sys.stderr,
         )
         exit(1)
@@ -66,7 +66,7 @@ chessboard_size = (9, 6)  # Number of inner corners per chessboard row and colum
 square_size = 25.0  # Size of a square in millimeters
 
 # Prepare object points based on the real-world dimensions of the calibration pattern
-objp = np.zeros((chessboard_size[0] * chessboard_size[1], 3), np.float32)
+objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
 objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(-1, 2)
 objp *= square_size
 
@@ -152,9 +152,22 @@ while True:
                     None,
                     None,
                 )
-                # Convert matrices to lists for JSON serialization
-                camera["camera_matrix"] = mtx.tolist()
-                camera["dist_coeff"] = dist.tolist()
+                # Extract intrinsic parameters
+                fx = mtx[0, 0]
+                fy = mtx[1, 1]
+                s = mtx[0, 1]
+                cx = mtx[0, 2]
+                cy = mtx[1, 2]
+                dist_coeffs = dist.flatten().tolist()
+
+                # Store intrinsic parameters in the desired format
+                camera["intrinsic"] = {
+                    "focal_length_pixels": {"x": fx, "y": fy},
+                    "skew_coefficient": s,
+                    "principal_point": {"x": cx, "y": cy},
+                    "dist_coeffs": dist_coeffs,
+                }
+
                 camera["calibrated"] = True
                 print(f"Intrinsic calibration completed for camera {idx}.")
                 print(f"Calibration parameters saved for camera {idx}.")
@@ -166,8 +179,7 @@ while True:
         calibration_data = [
             {
                 "index": camera["index"],
-                "camera_matrix": camera["camera_matrix"],
-                "dist_coeff": camera["dist_coeff"],
+                "intrinsic": camera["intrinsic"],
             }
             for camera in cameras
         ]
