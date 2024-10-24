@@ -6,7 +6,7 @@ import numpy as np
 import json
 import argparse
 
-# Set up argument parser to accept a path to the cameras declarations file and output file name
+# Set up argument parser to accept various parameters
 parser = argparse.ArgumentParser(description="Camera Calibration Script")
 parser.add_argument(
     "--cameras",
@@ -20,10 +20,39 @@ parser.add_argument(
     default="calibration.json",
     help="Name of the output JSON file for calibration data",
 )
+parser.add_argument(
+    "--calibration_images_needed",
+    type=int,
+    default=10,
+    help="Number of calibration images required per camera",
+)
+parser.add_argument(
+    "--chessboard_size",
+    type=str,
+    default="9x6",
+    help="Chessboard size as columns x rows (inner corners), e.g., '9x6'",
+)
+parser.add_argument(
+    "--square_size",
+    type=float,
+    default=25.0,
+    help="Size of a square in millimeters",
+)
 
 args = parser.parse_args()
 cameras_path = args.cameras
 output_file = args.output
+calibration_images_needed = args.calibration_images_needed
+
+# Parse chessboard size argument
+try:
+    chessboard_cols, chessboard_rows = map(int, args.chessboard_size.lower().split("x"))
+    chessboard_size = (chessboard_cols, chessboard_rows)
+except ValueError:
+    print("Error: Invalid chessboard_size format. Use 'colsxrows', e.g., '9x6'.")
+    sys.exit(1)
+
+square_size = args.square_size
 
 # Load camera configurations from the JSON file
 with open(cameras_path, "r") as f:
@@ -37,7 +66,7 @@ for camera in cameras:
     cap = cv2.VideoCapture(camera["index"])
     if not cap.isOpened():
         print(f"Error: Could not open camera {camera['index']}")
-        exit(1)
+        sys.exit(1)
     camera["cap"] = cap
 
     # Disable autofocus
@@ -46,24 +75,19 @@ for camera in cameras:
         cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
 
     # Set manual focus value
-    focus_supported = cap.set(cv2.CAP_PROP_FOCUS, camera["focus"])
+    focus_supported = cap.set(cv2.CAP_PROP_FOCUS, camera.get("focus", 0))
     if not focus_supported:
         print(
             f"Camera {camera['index']} does not support manual focus! (or an invalid focus value provided)",
             file=sys.stderr,
         )
-        exit(1)
+        sys.exit(1)
 
     # Initialize calibration data
     camera["calibration_count"] = 0
     camera["objpoints"] = []  # 3D points in real-world space
     camera["imgpoints"] = []  # 2D points in image plane
     camera["calibrated"] = False
-
-# Calibration parameters
-calibration_images_needed = 10  # Number of calibration images required per camera
-chessboard_size = (9, 6)  # Number of inner corners per chessboard row and column
-square_size = 25.0  # Size of a square in millimeters
 
 # Prepare object points based on the real-world dimensions of the calibration pattern
 objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
