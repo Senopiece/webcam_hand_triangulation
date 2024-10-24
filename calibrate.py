@@ -118,6 +118,7 @@ for camera in cameras:
 
     # Initialize calibration data
     camera["calibration_count"] = 0
+    camera["image_size"] = None
     camera["imgpoints"] = []  # 2D points in image plane
 
 print()
@@ -182,6 +183,13 @@ while any(
                 camera["imgpoints"].append(corners2)
                 camera["calibration_count"] += 1
 
+                # Update image size and ensiure it's consistent
+                assert (
+                    camera["image_size"] is None
+                    or camera["image_size"] == gray.shape[::-1]
+                )
+                camera["image_size"] = gray.shape[::-1]
+
                 # Draw and display the corners
                 print(
                     f"Calibration image {camera['calibration_count']} collected for camera {idx}."
@@ -205,7 +213,7 @@ for camera in cameras:
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
         [objp for _ in camera["imgpoints"]],
         camera["imgpoints"],
-        gray.shape[::-1],
+        camera["image_size"],
         None,
         None,
     )
