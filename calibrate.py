@@ -1,3 +1,7 @@
+# TODO: I see that calibration produces very varying parameters,
+# do several trials, plot parameter distribution (also indicating the reprojection error somehow) and analyze it
+# maybe parameters are not independent (and are in some sense redundant) and hence maybe tweaking a parameter we can remain the correctness of the matrix by adjusting some other parameters
+
 print("Launching...")
 
 import sys
