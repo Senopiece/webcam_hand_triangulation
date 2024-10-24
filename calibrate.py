@@ -2,8 +2,6 @@
 # do several trials, plot parameter distribution (also indicating the reprojection error somehow) and analyze it
 # maybe parameters are not independent (and are in some sense redundant) and hence maybe tweaking a parameter we can remain the correctness of the matrix by adjusting some other parameters
 
-print("Launching...")
-
 import sys
 import cv2
 import numpy as np
@@ -13,7 +11,7 @@ import argparse
 # Set up argument parser to accept various parameters
 parser = argparse.ArgumentParser(description="Camera Calibration Script")
 parser.add_argument(
-    "--input",
+    "--file",
     type=str,
     default="cameras.json",
     help="Path to the cameras declarations file",
@@ -23,12 +21,6 @@ parser.add_argument(
     type=str,
     default=None,
     help="Comma-separated list of camera indices to use, e.g., '0,1,2'",
-)
-parser.add_argument(
-    "--output",
-    type=str,
-    default="calibration.json",
-    help="Name of the output JSON file for calibration data",
 )
 parser.add_argument(
     "--n",
@@ -48,10 +40,15 @@ parser.add_argument(
     default=25.0,
     help="Size of a square in millimeters",
 )
+parser.add_argument(
+    "-f",
+    "--force",
+    help="Force overwrite calibrations",
+    action="store_true",
+)
 
 args = parser.parse_args()
-cameras_path = args.input
-output_file = args.output
+cameras_path = args.file
 calibration_images_needed = args.n
 
 # Parse chessboard size argument
@@ -76,34 +73,62 @@ else:
 
 # Load camera configurations from the JSON file
 with open(cameras_path, "r") as f:
-    all_cameras = json.load(f)
+    all_cameras_confs = json.load(f)
+
 
 # Filter cameras based on specified indices
 if specified_indices is not None:
-    cameras = [camera for camera in all_cameras if camera["index"] in specified_indices]
-    if not cameras:
-        print("Error: No matching cameras found for the specified indices.")
+    actual_indices = set(camera_conf["index"] for camera_conf in all_cameras_confs)
+    unknown_cameras = specified_indices - actual_indices
+
+    if len(unknown_cameras) != 0:
+        print(f"Error: Cameras {unknown_cameras} are not defined in the file")
         sys.exit(1)
+
+    cameras_confs = [
+        camera_conf
+        for camera_conf in all_cameras_confs
+        if camera_conf["index"] in specified_indices
+    ]
 else:
-    cameras = all_cameras
+    cameras_confs = all_cameras_confs
+
+# Notify if calibration already exist
+if not args.force:
+    new_cameras_confs = []
+
+    for camera_conf in cameras_confs:
+        idx = camera_conf["index"]
+
+        if "intrinsic" in camera_conf:
+            owerwrite = input(
+                f"Intrincic calibration of camera {idx} already exists. Owerwrite? (y/n): "
+            )
+            if owerwrite.strip().lower().startswith("y"):
+                print("Ok, will overwrite")
+            else:
+                print("Ok, skip this camera from calibration")
+                continue
+
+        new_cameras_confs.append(camera_conf)
+
+    cameras_confs = new_cameras_confs
 
 # Check if any cameras are loaded
-if not cameras:
+if not cameras_confs:
     print(
         "Error: No cameras loaded. Please check your cameras.json file and camera_indices argument."
     )
     sys.exit(1)
 
-for camera in cameras:
-    assert isinstance(camera["index"], int), "Camera index must be an integer"
-
 # Initialize video captures
-for camera in cameras:
-    cap = cv2.VideoCapture(camera["index"])
+print("\nLaunching...")
+cameras = []
+for camera_conf in cameras_confs:
+    cap = cv2.VideoCapture(camera_conf["index"])
     if not cap.isOpened():
-        print(f"Error: Could not open camera {camera['index']}")
+        print(f"Error: Could not open camera {camera_conf['index']}")
         sys.exit(1)
-    camera["cap"] = cap
 
     # Disable autofocus
     autofocus_supported = cap.get(cv2.CAP_PROP_AUTOFOCUS) != -1
@@ -111,19 +136,27 @@ for camera in cameras:
         cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
 
     # Set manual focus value
-    focus_value = camera.get("focus", 0)
+    focus_value = camera_conf.get("focus", 0)
     focus_supported = cap.set(cv2.CAP_PROP_FOCUS, focus_value)
     if not focus_supported:
         print(
-            f"Camera {camera['index']} does not support manual focus! (or an invalid focus value provided)",
+            f"Camera {camera_conf['index']} does not support manual focus! (or an invalid focus value provided)",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    # Initialize calibration data
-    camera["calibration_count"] = 0
-    camera["image_size"] = None
-    camera["imgpoints"] = []  # 2D points in image plane
+    # Remember the camera
+    cameras.append(
+        {
+            "index": camera_conf["index"],
+            "calibration_count": 0,
+            "image_size": None,
+            "imgpoints": [],  # 2D points in image plane
+            "cap": cap,
+        }
+    )
+
+del cameras_confs
 
 print()
 print("=== Camera Calibration Script ===")
@@ -134,8 +167,9 @@ print(
 print("2. For each camera, display the calibration pattern within its field of view.")
 print("3. Press 'c' to capture calibration images for all cameras.")
 print(f"   Collect at least {calibration_images_needed} images per camera.")
-print("4. The script will notify you when enough images are collected for each camera.")
-print(f"5. Calibration parameters will be saved to '{output_file}'.")
+print(
+    "4. After enough images per camera was collected, script will perform calibration and write the results back to the cameras file."
+)
 
 # Set up windows for each camera feed
 for camera in cameras:
@@ -241,8 +275,11 @@ for camera in cameras:
         total_r_error += error
     mean_r_error = total_r_error / len(camera["imgpoints"])
 
+    # Modify the camera confs
+    camera_conf = [conf for conf in all_cameras_confs if conf["index"] == idx][0]
+
     # Store intrinsic parameters in the desired format
-    camera["intrinsic"] = {
+    camera_conf["intrinsic"] = {
         "focal_length_pixels": {"x": fx, "y": fy},
         "skew_coefficient": s,
         "principal_point": {"x": cx, "y": cy},
@@ -252,17 +289,8 @@ for camera in cameras:
 
     print(f"Intrinsic calibration completed for camera {idx}.")
     print(f"Mean reprojection error for camera {idx}: {mean_r_error:.4f} pixels")
-    print(f"Calibration parameters saved for camera {idx}.")
 
 # Save calibrations
-calibration_data = [
-    {
-        "index": camera["index"],
-        "intrinsic": camera["intrinsic"],
-    }
-    for camera in cameras
-]
-with open(output_file, "w") as f:
-    json.dump(calibration_data, f, indent=4)
-print(f"All cameras calibrated. Calibration data saved to '{output_file}'.")
-print("You can now use this calibration data in your main application.")
+with open(cameras_path, "w") as f:
+    json.dump(all_cameras_confs, f, indent=4)
+print("Cameras file updated.")
