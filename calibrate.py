@@ -284,7 +284,7 @@ for camera in cameras:
         "skew_coefficient": s,
         "principal_point": {"x": cx, "y": cy},
         "dist_coeffs": dist_coeffs,
-        "reprojection_error": mean_r_error,
+        "reprojection_error": mean_r_error,  # a pseudoparameter - just to verify how good the projection is
     }
 
     print(f"Intrinsic calibration completed for camera {idx}.")
