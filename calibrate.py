@@ -118,14 +118,7 @@ for camera in cameras:
 
     # Initialize calibration data
     camera["calibration_count"] = 0
-    camera["objpoints"] = []  # 3D points in real-world space
     camera["imgpoints"] = []  # 2D points in image plane
-    camera["calibrated"] = False
-
-# Prepare object points based on the real-world dimensions of the calibration pattern
-objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
-objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(-1, 2)
-objp *= square_size
 
 print()
 print("=== Camera Calibration Script ===")
@@ -143,8 +136,10 @@ print(f"5. Calibration parameters will be saved to '{output_file}'.")
 for camera in cameras:
     cv2.namedWindow(f"Camera_{camera['index']}", cv2.WINDOW_NORMAL)
 
-# Capture frames
-while True:
+# Capture frames until any camera has not enough images for calibration
+while any(
+    camera["calibration_count"] < calibration_images_needed for camera in cameras
+):
     for camera in cameras:
         cap = camera["cap"]
         idx = camera["index"]
@@ -184,7 +179,6 @@ while True:
                         0.001,
                     ),
                 )
-                camera["objpoints"].append(objp)
                 camera["imgpoints"].append(corners2)
                 camera["calibration_count"] += 1
 
@@ -195,22 +189,21 @@ while True:
             else:
                 print(f"Calibration pattern not found in camera {idx}.")
 
-    # Exit the loop if enough images have been collected for every camera
-    if all(
-        camera["calibration_count"] >= calibration_images_needed for camera in cameras
-    ):
-        break
-
 # Release windows
 for camera in cameras:
     camera["cap"].release()
 cv2.destroyAllWindows()
 
+# Prepare object points based on the real-world dimensions of the calibration pattern
+objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
+objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(-1, 2)
+objp *= square_size
+
 # Perform calibrations
 for camera in cameras:
     print(f"Performing intrinsic calibration for camera {idx}...")
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
-        camera["objpoints"],
+        [objp for _ in camera["imgpoints"]],
         camera["imgpoints"],
         gray.shape[::-1],
         None,
@@ -232,7 +225,6 @@ for camera in cameras:
         "dist_coeffs": dist_coeffs,
     }
 
-    camera["calibrated"] = True
     print(f"Intrinsic calibration completed for camera {idx}.")
     print(f"Calibration parameters saved for camera {idx}.")
 
