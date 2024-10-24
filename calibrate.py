@@ -209,6 +209,8 @@ objp *= square_size
 
 # Perform calibrations
 for camera in cameras:
+    idx = camera["index"]
+
     print(f"Performing intrinsic calibration for camera {idx}...")
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
         [objp for _ in camera["imgpoints"]],
@@ -225,15 +227,27 @@ for camera in cameras:
     cy = mtx[1, 2]
     dist_coeffs = dist.flatten().tolist()
 
+    # Calculate Reprojection Error (e.g the inverse of how confident is the script that the determined parameters are correct)
+    total_r_error = 0
+    for i in range(len(camera["imgpoints"])):
+        imgpoints2, _ = cv2.projectPoints(objp, rvecs[i], tvecs[i], mtx, dist)
+        error = cv2.norm(camera["imgpoints"][i], imgpoints2, cv2.NORM_L2) / len(
+            imgpoints2
+        )
+        total_r_error += error
+    mean_r_error = total_r_error / len(camera["imgpoints"])
+
     # Store intrinsic parameters in the desired format
     camera["intrinsic"] = {
         "focal_length_pixels": {"x": fx, "y": fy},
         "skew_coefficient": s,
         "principal_point": {"x": cx, "y": cy},
         "dist_coeffs": dist_coeffs,
+        "reprojection_error": mean_r_error,
     }
 
     print(f"Intrinsic calibration completed for camera {idx}.")
+    print(f"Mean reprojection error for camera {idx}: {mean_r_error:.4f} pixels")
     print(f"Calibration parameters saved for camera {idx}.")
 
 # Save calibrations
