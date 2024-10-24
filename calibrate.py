@@ -15,6 +15,12 @@ parser.add_argument(
     help="Path to the cameras declarations file",
 )
 parser.add_argument(
+    "--camera_indices",
+    type=str,
+    default=None,
+    help="Comma-separated list of camera indices to use, e.g., '0,1,2'",
+)
+parser.add_argument(
     "--output",
     type=str,
     default="calibration.json",
@@ -54,9 +60,37 @@ except ValueError:
 
 square_size = args.square_size
 
+# Parse camera_indices argument
+if args.camera_indices is not None:
+    try:
+        specified_indices = set(map(int, args.camera_indices.split(",")))
+    except ValueError:
+        print(
+            "Error: Invalid format for camera_indices. Use a comma-separated list of integers."
+        )
+        sys.exit(1)
+else:
+    specified_indices = None
+
 # Load camera configurations from the JSON file
 with open(cameras_path, "r") as f:
-    cameras = json.load(f)
+    all_cameras = json.load(f)
+
+# Filter cameras based on specified indices
+if specified_indices is not None:
+    cameras = [camera for camera in all_cameras if camera["index"] in specified_indices]
+    if not cameras:
+        print("Error: No matching cameras found for the specified indices.")
+        sys.exit(1)
+else:
+    cameras = all_cameras
+
+# Check if any cameras are loaded
+if not cameras:
+    print(
+        "Error: No cameras loaded. Please check your cameras.json file and camera_indices argument."
+    )
+    sys.exit(1)
 
 for camera in cameras:
     assert isinstance(camera["index"], int), "Camera index must be an integer"
@@ -75,7 +109,8 @@ for camera in cameras:
         cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
 
     # Set manual focus value
-    focus_supported = cap.set(cv2.CAP_PROP_FOCUS, camera.get("focus", 0))
+    focus_value = camera.get("focus", 0)
+    focus_supported = cap.set(cv2.CAP_PROP_FOCUS, focus_value)
     if not focus_supported:
         print(
             f"Camera {camera['index']} does not support manual focus! (or an invalid focus value provided)",
