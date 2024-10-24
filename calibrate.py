@@ -9,13 +9,13 @@ import argparse
 # Set up argument parser to accept various parameters
 parser = argparse.ArgumentParser(description="Camera Calibration Script")
 parser.add_argument(
-    "--cameras",
+    "--input",
     type=str,
     default="cameras.json",
     help="Path to the cameras declarations file",
 )
 parser.add_argument(
-    "--camera_indices",
+    "--cams",
     type=str,
     default=None,
     help="Comma-separated list of camera indices to use, e.g., '0,1,2'",
@@ -27,7 +27,7 @@ parser.add_argument(
     help="Name of the output JSON file for calibration data",
 )
 parser.add_argument(
-    "--calibration_images_needed",
+    "--n",
     type=int,
     default=10,
     help="Number of calibration images required per camera",
@@ -46,9 +46,9 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
-cameras_path = args.cameras
+cameras_path = args.input
 output_file = args.output
-calibration_images_needed = args.calibration_images_needed
+calibration_images_needed = args.n
 
 # Parse chessboard size argument
 try:
@@ -61,13 +61,11 @@ except ValueError:
 square_size = args.square_size
 
 # Parse camera_indices argument
-if args.camera_indices is not None:
+if args.cams is not None:
     try:
-        specified_indices = set(map(int, args.camera_indices.split(",")))
+        specified_indices = set(map(int, args.cams.split(",")))
     except ValueError:
-        print(
-            "Error: Invalid format for camera_indices. Use a comma-separated list of integers."
-        )
+        print("Error: Invalid format for cams. Use a comma-separated list of integers.")
         sys.exit(1)
 else:
     specified_indices = None
@@ -145,6 +143,7 @@ print(f"5. Calibration parameters will be saved to '{output_file}'.")
 for camera in cameras:
     cv2.namedWindow(f"Camera_{camera['index']}", cv2.WINDOW_NORMAL)
 
+# Capture frames
 while True:
     for camera in cameras:
         cap = camera["cap"]
@@ -190,65 +189,62 @@ while True:
                 camera["calibration_count"] += 1
 
                 # Draw and display the corners
-                cv2.drawChessboardCorners(frame, chessboard_size, corners2, ret)
-                cv2.imshow(f"Camera_{idx}", frame)
                 print(
                     f"Calibration image {camera['calibration_count']} collected for camera {idx}."
                 )
             else:
                 print(f"Calibration pattern not found in camera {idx}.")
 
-            # Check if enough images have been collected
-            if (
-                camera["calibration_count"] >= calibration_images_needed
-                and not camera["calibrated"]
-            ):
-                print(f"Performing intrinsic calibration for camera {idx}...")
-                ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
-                    camera["objpoints"],
-                    camera["imgpoints"],
-                    gray.shape[::-1],
-                    None,
-                    None,
-                )
-                # Extract intrinsic parameters
-                fx = mtx[0, 0]
-                fy = mtx[1, 1]
-                s = mtx[0, 1]
-                cx = mtx[0, 2]
-                cy = mtx[1, 2]
-                dist_coeffs = dist.flatten().tolist()
-
-                # Store intrinsic parameters in the desired format
-                camera["intrinsic"] = {
-                    "focal_length_pixels": {"x": fx, "y": fy},
-                    "skew_coefficient": s,
-                    "principal_point": {"x": cx, "y": cy},
-                    "dist_coeffs": dist_coeffs,
-                }
-
-                camera["calibrated"] = True
-                print(f"Intrinsic calibration completed for camera {idx}.")
-                print(f"Calibration parameters saved for camera {idx}.")
-
-    # Save calibration parameters if all cameras are calibrated
-    all_calibrated = all(camera["calibrated"] for camera in cameras)
-    if all_calibrated:
-        # Prepare calibration data to save
-        calibration_data = [
-            {
-                "index": camera["index"],
-                "intrinsic": camera["intrinsic"],
-            }
-            for camera in cameras
-        ]
-        with open(output_file, "w") as f:
-            json.dump(calibration_data, f, indent=4)
-        print(f"All cameras calibrated. Calibration data saved to '{output_file}'.")
-        print("You can now use this calibration data in your main application.")
+    # Exit the loop if enough images have been collected for every camera
+    if all(
+        camera["calibration_count"] >= calibration_images_needed for camera in cameras
+    ):
         break
 
-# Release resources
+# Release windows
 for camera in cameras:
     camera["cap"].release()
 cv2.destroyAllWindows()
+
+# Perform calibrations
+for camera in cameras:
+    print(f"Performing intrinsic calibration for camera {idx}...")
+    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
+        camera["objpoints"],
+        camera["imgpoints"],
+        gray.shape[::-1],
+        None,
+        None,
+    )
+    # Extract intrinsic parameters
+    fx = mtx[0, 0]
+    fy = mtx[1, 1]
+    s = mtx[0, 1]
+    cx = mtx[0, 2]
+    cy = mtx[1, 2]
+    dist_coeffs = dist.flatten().tolist()
+
+    # Store intrinsic parameters in the desired format
+    camera["intrinsic"] = {
+        "focal_length_pixels": {"x": fx, "y": fy},
+        "skew_coefficient": s,
+        "principal_point": {"x": cx, "y": cy},
+        "dist_coeffs": dist_coeffs,
+    }
+
+    camera["calibrated"] = True
+    print(f"Intrinsic calibration completed for camera {idx}.")
+    print(f"Calibration parameters saved for camera {idx}.")
+
+# Save calibrations
+calibration_data = [
+    {
+        "index": camera["index"],
+        "intrinsic": camera["intrinsic"],
+    }
+    for camera in cameras
+]
+with open(output_file, "w") as f:
+    json.dump(calibration_data, f, indent=4)
+print(f"All cameras calibrated. Calibration data saved to '{output_file}'.")
+print("You can now use this calibration data in your main application.")
