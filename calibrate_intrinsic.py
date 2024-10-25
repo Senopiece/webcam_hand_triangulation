@@ -37,7 +37,7 @@ parser.add_argument(
 parser.add_argument(
     "--square_size",
     type=float,
-    default=25.0,
+    default=8,
     help="Size of a square in millimeters",
 )
 parser.add_argument(
