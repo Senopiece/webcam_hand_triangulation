@@ -13,7 +13,7 @@ parser = argparse.ArgumentParser(description="Camera Calibration Script")
 parser.add_argument(
     "--file",
     type=str,
-    default="cameras.json",
+    default="setup.json",
     help="Path to the cameras declarations file",
 )
 parser.add_argument(
