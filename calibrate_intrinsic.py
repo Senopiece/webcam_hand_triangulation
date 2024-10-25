@@ -14,7 +14,7 @@ parser.add_argument(
     "--file",
     type=str,
     default="setup.json",
-    help="Path to the cameras declarations file",
+    help="Path to the state declarations file",
 )
 parser.add_argument(
     "--cams",
