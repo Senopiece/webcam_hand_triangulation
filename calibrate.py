@@ -108,11 +108,14 @@ print(f"   Collect at least {calibration_images_needed} images.")
 print("4. Calibration will be performed, and results saved.")
 
 for camera in cameras:
-    cv2.namedWindow(f"Camera_{camera['index']}", cv2.WINDOW_NORMAL)
+    cv2.namedWindow(f"Camera_{camera['index']}", cv2.WINDOW_AUTOSIZE)
 
+# Capture frames and display recognized pattern points
 calibration_count = 0
 while calibration_count < calibration_images_needed:
     frames = []
+    cameras_imgpoints = {}  # Dictionary to store valid corners for each camera
+
     for camera in cameras:
         cap = camera["cap"]
         idx = camera["index"]
@@ -122,7 +125,30 @@ while calibration_count < calibration_images_needed:
             print(f"Error: Could not read from camera {idx}")
             continue
 
-        frames.append((camera, frame))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        ret, corners = cv2.findChessboardCorners(gray, chessboard_size, None)
+
+        # If corners are found, refine and store them, and draw them on the frame
+        if ret:
+            corners2 = cv2.cornerSubPix(
+                gray,
+                corners,
+                (11, 11),
+                (-1, -1),
+                criteria=(
+                    cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
+                    30,
+                    0.001,
+                ),
+            )
+            cameras_imgpoints[idx] = corners2  # Store the refined corners for later use
+            cv2.drawChessboardCorners(frame, chessboard_size, corners2, ret)
+
+        # Set image size once for each camera
+        if camera["image_size"] is None:
+            camera["image_size"] = gray.shape[::-1]
+
+        # Display the frame with drawn corners if detected
         cv2.imshow(f"Camera_{idx}", frame)
 
     key = cv2.waitKey(1)
@@ -131,41 +157,23 @@ while calibration_count < calibration_images_needed:
         break
 
     elif key & 0xFF == ord("c"):
-        print("Capturing calibration images...")
-        cameras_imgpoints = {}
-        for i, camera, frame in enumerate(frames):
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            ret, corners = cv2.findChessboardCorners(gray, chessboard_size, None)
-            if ret:
-                corners2 = cv2.cornerSubPix(
-                    gray,
-                    corners,
-                    (11, 11),
-                    (-1, -1),
-                    criteria=(
-                        cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
-                        30,
-                        0.001,
-                    ),
-                )
-                cameras_imgpoints[i] = corners2
-                camera["image_size"] = gray.shape[::-1]
-            else:
-                print(f"Calibration pattern not found in camera {camera['index']}.")
-
+        # Check if the pattern was visible in all cameras simultaneously
         if len(cameras_imgpoints) == len(cameras):
             calibration_count += 1
-            for i, corners2 in cameras_imgpoints.items():
-                cameras[i]["imgpoints"].append(corners2)
+            for idx, corners2 in cameras_imgpoints.items():
+                camera = next(cam for cam in cameras if cam["index"] == idx)
+                camera["imgpoints"].append(corners2)
             print(
                 f"Calibration images captured for all cameras. Remaining {calibration_images_needed - calibration_count}."
             )
         else:
             print("Pattern is not visible to all cameras")
 
+# Release resources after loop
 for camera in cameras:
     camera["cap"].release()
 cv2.destroyAllWindows()
+
 
 objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
 objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(-1, 2)
