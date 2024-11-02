@@ -88,7 +88,6 @@ for camera_conf in cameras_confs:
         {
             "index": camera_conf["index"],
             "image_size": None,
-            "imgpoints": [],
             "cap": cap,
         }
     )
@@ -109,6 +108,14 @@ print("4. Calibration will be performed, and results saved.")
 
 for camera in cameras:
     cv2.namedWindow(f"Camera_{camera['index']}", cv2.WINDOW_AUTOSIZE)
+
+# Prepare object points
+objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
+objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(-1, 2)
+objp *= square_size
+
+# Arrays to store object points and image points from all cameras
+calibration_data = []
 
 # Capture frames and display recognized pattern points
 calibration_count = 0
@@ -160,9 +167,16 @@ while calibration_count < calibration_images_needed:
         # Check if the pattern was visible in all cameras simultaneously
         if len(cameras_imgpoints) == len(cameras):
             calibration_count += 1
-            for idx, corners2 in cameras_imgpoints.items():
-                camera = next(cam for cam in cameras if cam["index"] == idx)
-                camera["imgpoints"].append(corners2)
+            # Store the object points and image points for each camera
+            calibration_data.append(
+                {
+                    "object_points": objp.copy(),
+                    "image_points": {
+                        idx: corners2.copy()
+                        for idx, corners2 in cameras_imgpoints.items()
+                    },
+                }
+            )
             print(
                 f"Calibration images captured for all cameras. Remaining {calibration_images_needed - calibration_count}."
             )
@@ -174,50 +188,50 @@ for camera in cameras:
     camera["cap"].release()
 cv2.destroyAllWindows()
 
+# Prepare per-camera object points and image points
+for camera in cameras:
+    camera["objpoints"] = []
+    camera["imgpoints"] = []
+    idx = camera["index"]
+    for data in calibration_data:
+        camera["objpoints"].append(data["object_points"])
+        camera["imgpoints"].append(data["image_points"][idx])
 
-objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
-objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(-1, 2)
-objp *= square_size
-
-# Perform calibrations
+# Perform individual camera calibrations
 for camera in cameras:
     idx = camera["index"]
     print(f"Performing calibration for camera {idx}...")
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
-        [objp for _ in camera["imgpoints"]],
+        camera["objpoints"],
         camera["imgpoints"],
         camera["image_size"],
         None,
         None,
     )
 
+    camera["mtx"] = mtx
+    camera["dist"] = dist
+    camera["rvecs"] = rvecs
+    camera["tvecs"] = tvecs
+
     # Extract intrinsic parameters
     fx, fy = mtx[0, 0], mtx[1, 1]
     s, cx, cy = mtx[0, 1], mtx[0, 2], mtx[1, 2]
     dist_coeffs = dist.flatten().tolist()
 
-    # Extrinsic parameters based on the first image
-    rvec, tvec = rvecs[0], tvecs[0]
-    R, _ = cv2.Rodrigues(rvec)
-    T_cm = tvec * 0.1  # Convert to centimeters
-    yaw_deg, pitch_deg, roll_deg = cv2.decomposeProjectionMatrix(np.hstack((R, tvec)))[
-        6
-    ]
-    yaw_rad = yaw_deg * np.pi / 180
-    pitch_rad = pitch_deg * np.pi / 180
-    roll_rad = roll_deg * np.pi / 180
-
     # Calculate mean reprojection error
     total_r_error = 0
-    for i in range(len(camera["imgpoints"])):
-        imgpoints2, _ = cv2.projectPoints(objp, rvecs[i], tvecs[i], mtx, dist)
+    for i in range(len(camera["objpoints"])):
+        imgpoints2, _ = cv2.projectPoints(
+            camera["objpoints"][i], camera["rvecs"][i], camera["tvecs"][i], mtx, dist
+        )
         error = cv2.norm(camera["imgpoints"][i], imgpoints2, cv2.NORM_L2) / len(
             imgpoints2
         )
         total_r_error += error
-    mean_r_error = total_r_error / len(camera["imgpoints"])
+    mean_r_error = total_r_error / len(camera["objpoints"])
 
-    # Store calibration results in camera configuration
+    # Store intrinsic calibration results in camera configuration
     cam_conf = next(conf for conf in cameras_confs if conf["index"] == idx)
     cam_conf["intrinsic"] = {
         "focal_length_pixels": {"x": fx, "y": fy},
@@ -225,22 +239,88 @@ for camera in cameras:
         "principal_point": {"x": cx, "y": cy},
         "dist_coeffs": dist_coeffs,
     }
-    cam_conf["extrinsic"] = {
-        "translation_centimeters": {
-            "x": float(T_cm[0]),
-            "y": float(T_cm[1]),
-            "z": float(T_cm[2]),
-        },
-        "rotation_radians": {
-            "yaw": float(yaw_rad),
-            "pitch": float(pitch_rad),
-            "roll": float(roll_rad),
-        },
-    }
     cam_conf["reprojection_error"] = mean_r_error
     print(
         f"Calibration for camera {idx} complete with mean reprojection error: {mean_r_error}."
     )
+
+# Perform stereo calibration between each pair of cameras to compute extrinsic parameters
+print("\nPerforming stereo calibration between camera pairs...")
+criteria_stereo = (cv2.TERM_CRITERIA_MAX_ITER + cv2.TERM_CRITERIA_EPS, 30, 1e-6)
+flags = cv2.CALIB_FIX_INTRINSIC
+
+for i in range(len(cameras)):
+    for j in range(i + 1, len(cameras)):
+        camera1 = cameras[i]
+        camera2 = cameras[j]
+        idx1 = camera1["index"]
+        idx2 = camera2["index"]
+        print(f"Stereo calibration between camera {idx1} and camera {idx2}...")
+
+        object_points = []
+        imgpoints1 = []
+        imgpoints2 = []
+
+        for k in range(len(calibration_data)):
+            object_points.append(calibration_data[k]["object_points"])
+            imgpoints1.append(calibration_data[k]["image_points"][idx1])
+            imgpoints2.append(calibration_data[k]["image_points"][idx2])
+
+        ret, _, _, _, _, R, T, E, F = cv2.stereoCalibrate(
+            object_points,
+            imgpoints1,
+            imgpoints2,
+            camera1["mtx"],
+            camera1["dist"],
+            camera2["mtx"],
+            camera2["dist"],
+            camera1["image_size"],
+            criteria=criteria_stereo,
+            flags=flags,
+        )
+
+        # Store the extrinsic parameters between cameras
+        cam_conf1 = next(conf for conf in cameras_confs if conf["index"] == idx1)
+        cam_conf2 = next(conf for conf in cameras_confs if conf["index"] == idx2)
+
+        # Convert rotation matrix to Euler angles
+        # Note: OpenCV uses different conventions, so you might need to adjust the axes
+        from math import atan2, asin
+
+        def rotationMatrixToEulerAngles(R):
+            sy = np.sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0])
+            singular = sy < 1e-6
+            if not singular:
+                x = atan2(R[2, 1], R[2, 2])
+                y = atan2(-R[2, 0], sy)
+                z = atan2(R[1, 0], R[0, 0])
+            else:
+                x = atan2(-R[1, 2], R[1, 1])
+                y = atan2(-R[2, 0], sy)
+                z = 0
+            return np.array([x, y, z])
+
+        # Get Euler angles in radians
+        euler_angles = rotationMatrixToEulerAngles(R)
+
+        # Store the extrinsic parameters relative to the first camera
+        if "extrinsics" not in cam_conf1:
+            cam_conf1["extrinsics"] = {}
+
+        cam_conf1["extrinsics"][f"to_camera_{idx2}"] = {
+            "rotation_radians": {
+                "x": float(euler_angles[0]),
+                "y": float(euler_angles[1]),
+                "z": float(euler_angles[2]),
+            },
+            "translation_centimeters": {
+                "x": float(T[0][0] / 10.0),
+                "y": float(T[1][0] / 10.0),
+                "z": float(T[2][0] / 10.0),
+            },
+        }
+
+        print(f"Stereo calibration between camera {idx1} and camera {idx2} complete.")
 
 # Save calibrations
 with open(cameras_path, "w") as f:
