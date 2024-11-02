@@ -1,10 +1,11 @@
+# a more powerful version of calibrate.py, but requires more work to do
+
 import sys
 import cv2
 import numpy as np
 import json
 import argparse
 import itertools
-from collections import deque
 
 # Set up argument parser to accept various parameters
 parser = argparse.ArgumentParser(description="Camera Extrinsic Calibration Script")
@@ -405,7 +406,6 @@ for idx in camera_indices:
             "pitch": float(pitch),
             "roll": float(roll),
         },
-        "reprojection_error": 0.0,  # TODO: Placeholder for now; computing error over paths is complex
     }
 
     print(f"Computed transformation from camera {reference_idx} to camera {idx}.")

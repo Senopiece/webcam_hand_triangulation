@@ -1,6 +1,4 @@
-# TODO: I see that calibration produces very varying parameters,
-# do several trials, plot parameter distribution (also indicating the reprojection error somehow) and analyze it
-# maybe parameters are not independent (and are in some sense redundant) and hence maybe tweaking a parameter we can remain the correctness of the matrix by adjusting some other parameters
+# calibrates just intrinsics for a set of cameras
 
 import sys
 import cv2
@@ -284,7 +282,6 @@ for camera in cameras:
         "skew_coefficient": s,
         "principal_point": {"x": cx, "y": cy},
         "dist_coeffs": dist_coeffs,
-        "reprojection_error": mean_r_error,  # a pseudoparameter - just to verify how good the projection is
     }
 
     print(f"Intrinsic calibration completed for camera {idx}.")
