@@ -170,7 +170,7 @@ def main():
             )
             sys.exit(1)
         cameras[idx]["cap"] = cap
-        cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_NORMAL)
+        cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_AUTOSIZE)
         # Initialize MediaPipe Hands tracker for each camera
         cameras[idx]["hands_tracker"] = mp_hands.Hands(
             static_image_mode=False,
