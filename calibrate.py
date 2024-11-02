@@ -15,7 +15,7 @@ parser.add_argument(
 parser.add_argument(
     "--n",
     type=int,
-    default=10,
+    default=12,
     help="Number of calibration images required per camera",
 )
 parser.add_argument(
@@ -27,7 +27,7 @@ parser.add_argument(
 parser.add_argument(
     "--square_size",
     type=float,
-    default=8,
+    default=11,
     help="Size of a square in millimeters",
 )
 parser.add_argument(
@@ -200,7 +200,12 @@ for camera in cameras:
     rvec, tvec = rvecs[0], tvecs[0]
     R, _ = cv2.Rodrigues(rvec)
     T_cm = tvec * 0.1  # Convert to centimeters
-    yaw, pitch, roll = cv2.decomposeProjectionMatrix(np.hstack((R, tvec)))[6]
+    yaw_deg, pitch_deg, roll_deg = cv2.decomposeProjectionMatrix(np.hstack((R, tvec)))[
+        6
+    ]
+    yaw_rad = yaw_deg * np.pi / 180
+    pitch_rad = pitch_deg * np.pi / 180
+    roll_rad = roll_deg * np.pi / 180
 
     # Calculate mean reprojection error
     total_r_error = 0
@@ -226,10 +231,10 @@ for camera in cameras:
             "y": float(T_cm[1]),
             "z": float(T_cm[2]),
         },
-        "rotation_degrees": {
-            "yaw": float(yaw),
-            "pitch": float(pitch),
-            "roll": float(roll),
+        "rotation_radians": {
+            "yaw": float(yaw_rad),
+            "pitch": float(pitch_rad),
+            "roll": float(roll_rad),
         },
     }
     cam_conf["reprojection_error"] = mean_r_error
