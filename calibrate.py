@@ -3,7 +3,7 @@
 import sys
 import cv2
 import numpy as np
-import json
+import json5
 import argparse
 
 # Set up argument parser to accept various parameters
@@ -11,7 +11,7 @@ parser = argparse.ArgumentParser(description="Camera Calibration Script")
 parser.add_argument(
     "--file",
     type=str,
-    default="setup.json",
+    default="setup.json5",
     help="Path to the state declarations file",
 )
 parser.add_argument(
@@ -23,7 +23,7 @@ parser.add_argument(
 parser.add_argument(
     "--chessboard_size",
     type=str,
-    default="9x6",
+    default="5x7",
     help="Chessboard size as columns x rows (inner corners), e.g., '9x6'",
 )
 parser.add_argument(
@@ -60,7 +60,7 @@ square_size = args.square_size
 
 # Load camera configurations from the JSON file
 with open(cameras_path, "r") as f:
-    cameras_confs = json.load(f)
+    cameras_confs = json5.load(f)
 
 # Notify if calibration already exists
 if not args.force and any(
@@ -100,7 +100,6 @@ for camera_conf in cameras_confs:
             "cap": cap,
         }
     )
-
 
 print()
 print("=== Camera Calibration Script ===")
@@ -183,6 +182,7 @@ for camera in cameras:
 cv2.destroyAllWindows()
 
 
+# Prepare object points (0,0,0), (1,0,0), ..., (cols-1,rows-1,0)
 objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
 objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(-1, 2)
 objp *= square_size
@@ -279,5 +279,5 @@ for camera in cameras:
 
 # Save calibrations
 with open(cameras_path, "w") as f:
-    json.dump(cameras_confs, f, indent=4)
+    json5.dump(cameras_confs, f, indent=4)
 print("Cameras file updated.")

@@ -1,4 +1,4 @@
-import json
+import json5
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -122,7 +122,7 @@ def main():
     parser.add_argument(
         "--file",
         type=str,
-        default="setup.json",
+        default="setup.json5",
         help="Path to the cameras declarations file",
     )
     args = parser.parse_args()
@@ -130,7 +130,7 @@ def main():
 
     # Load camera configurations from the JSON file
     with open(cameras_path, "r") as f:
-        cameras_confs = json.load(f)
+        cameras_confs = json5.load(f)
 
     # Extract extrinsic parameters
     cameras = []

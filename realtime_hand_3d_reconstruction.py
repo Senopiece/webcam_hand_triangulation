@@ -1,7 +1,7 @@
 import cv2
 import mediapipe as mp
 import numpy as np
-import json
+import json5
 import argparse
 import sys
 import matplotlib.pyplot as plt
@@ -10,7 +10,7 @@ from mpl_toolkits.mplot3d import Axes3D
 
 def load_camera_parameters(cameras_file):
     with open(cameras_file, "r") as f:
-        cameras_confs = json.load(f)
+        cameras_confs = json5.load(f)
 
     cameras = {}
     for cam_conf in cameras_confs:
@@ -135,7 +135,7 @@ def main():
     parser.add_argument(
         "--file",
         type=str,
-        default="setup.json",
+        default="setup.json5",
         help="Path to the cameras declarations file",
     )
     args = parser.parse_args()

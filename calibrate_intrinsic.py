@@ -3,7 +3,7 @@
 import sys
 import cv2
 import numpy as np
-import json
+import json5
 import argparse
 
 # Set up argument parser to accept various parameters
@@ -11,7 +11,7 @@ parser = argparse.ArgumentParser(description="Camera Calibration Script")
 parser.add_argument(
     "--file",
     type=str,
-    default="setup.json",
+    default="setup.json5",
     help="Path to the state declarations file",
 )
 parser.add_argument(
@@ -71,7 +71,7 @@ else:
 
 # Load camera configurations from the JSON file
 with open(cameras_path, "r") as f:
-    all_cameras_confs = json.load(f)
+    all_cameras_confs = json5.load(f)
 
 
 # Filter cameras based on specified indices
@@ -289,5 +289,5 @@ for camera in cameras:
 
 # Save calibrations
 with open(cameras_path, "w") as f:
-    json.dump(all_cameras_confs, f, indent=4)
+    json5.load(all_cameras_confs, f, indent=4)
 print("Cameras file updated.")

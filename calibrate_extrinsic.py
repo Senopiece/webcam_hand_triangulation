@@ -3,7 +3,7 @@
 import sys
 import cv2
 import numpy as np
-import json
+import json5
 import argparse
 import itertools
 
@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser(description="Camera Extrinsic Calibration Scrip
 parser.add_argument(
     "--file",
     type=str,
-    default="setup.json",
+    default="setup.json5",
     help="Path to the cameras declarations file",
 )
 parser.add_argument(
@@ -56,7 +56,7 @@ square_size = args.square_size
 
 # Load camera configurations from the JSON file
 with open(cameras_path, "r") as f:
-    cameras_confs = json.load(f)
+    cameras_confs = json5.load(f)
 
 # Check for intrinsic parameters and collect camera indices
 camera_indices = []
@@ -412,5 +412,5 @@ for idx in camera_indices:
 
 # Save calibrations
 with open(cameras_path, "w") as f:
-    json.dump(cameras_confs, f, indent=4)
+    json5.load(cameras_confs, f, indent=4)
 print("\nCameras file updated with extrinsic parameters.")
