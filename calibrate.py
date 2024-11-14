@@ -29,7 +29,7 @@ parser.add_argument(
 parser.add_argument(
     "--square_size",
     type=float,
-    default=11,
+    default=13.7,
     help="Size of a square in millimeters",
 )
 parser.add_argument(
@@ -133,35 +133,31 @@ while calibration_count < calibration_images_needed:
             continue
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        ret, corners = cv2.findChessboardCorners(gray, chessboard_size, None)
+        ret, corners, meta = cv2.findChessboardCornersSBWithMeta(
+            gray,
+            chessboard_size,
+            flags=cv2.CALIB_CB_MARKER,
+        )
 
-        # If corners are found, refine and store them, and draw them on the frame
         if ret:
-            corners2 = cv2.cornerSubPix(
-                gray,
-                corners,
-                (11, 11),
-                (-1, -1),
-                criteria=(
-                    cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
-                    30,
-                    0.001,
-                ),
-            )
-            cameras_imgpoints[idx] = corners2  # Store the refined corners for later use
-            cv2.drawChessboardCorners(frame, chessboard_size, corners2, ret)
+            if meta.shape[0] != chessboard_rows:
+                corners = corners.reshape(-1, 2)
+                corners = corners.reshape(*chessboard_size, 2)
+                corners = corners.transpose(1, 0, 2)
+                corners = corners.reshape(-1, 2)
+                corners = corners[:, np.newaxis, :]
+            cameras_imgpoints[idx] = corners
+            cv2.drawChessboardCorners(frame, chessboard_size, corners, ret)
 
-        # Set image size once for each camera
         if camera["image_size"] is None:
             camera["image_size"] = gray.shape[::-1]
 
-        # Display the frame with drawn corners if detected
         cv2.imshow(f"Camera_{idx}", frame)
 
     key = cv2.waitKey(1)
     if key & 0xFF == ord("q"):
         print("Exiting calibration script.")
-        break
+        sys.exit(0)
 
     elif key & 0xFF == ord("c"):
         # Check if the pattern was visible in all cameras simultaneously
@@ -272,7 +268,6 @@ for camera in cameras:
             "roll": float(roll_rad),
         },
     }
-    cam_conf["reprojection_error"] = mean_r_error
     print(
         f"Calibration for camera {idx} complete with mean reprojection error: {mean_r_error}."
     )

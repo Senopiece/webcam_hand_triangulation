@@ -19,7 +19,6 @@
                 0.005300320884930569,
                 -17.326067783790826
             ],
-            "reprojection_error": 0.2453360535433792
         },
         "extrinsic": {
             "translation_centimeters": {
@@ -32,7 +31,6 @@
                 "pitch": 0.0,
                 "roll": 0.0
             },
-            "reprojection_error": 0.0
         }
     },
     {
@@ -55,7 +53,6 @@
                 0.011518809909073337,
                 5.71546679859963
             ],
-            "reprojection_error": 0.2465233319261287
         },
         "extrinsic": {
             "translation_centimeters": {
@@ -68,7 +65,6 @@
                 "pitch": -0.1938134665220149,
                 "roll": -3.0714050283644436
             },
-            "reprojection_error": 0.0
         }
     },
     {
@@ -91,7 +87,6 @@
                 0.004253396790496694,
                 3.8094845068941803
             ],
-            "reprojection_error": 0.08700391580116876
         },
         "extrinsic": {
             "translation_centimeters": {
@@ -104,7 +99,6 @@
                 "pitch": 1.0022724970275538,
                 "roll": 2.971011455510588
             },
-            "reprojection_error": 0.0
         }
     },
     {
@@ -127,7 +121,6 @@
                 -0.010864664791113475,
                 -14.123624407780047
             ],
-            "reprojection_error": 0.32191879225604797
         },
         "extrinsic": {
             "translation_centimeters": {
@@ -140,7 +133,6 @@
                 "pitch": -1.1417949179029832,
                 "roll": 0.1473530964853901
             },
-            "reprojection_error": 0.0
         }
     }
 ]

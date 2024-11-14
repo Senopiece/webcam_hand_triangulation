@@ -1,0 +1,16 @@
+columns: 6
+from_config: null
+markers:
+- 3
+- 3
+- 3
+- 4
+- 2
+- 4
+output: radon_checkerboard.svg
+p_type: radon_checkerboard
+page_size: A5
+radius_rate: 0.0
+rows: 8
+square_size: 24.0
+units: mm
