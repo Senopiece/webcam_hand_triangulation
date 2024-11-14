@@ -29,13 +29,13 @@ parser.add_argument(
 parser.add_argument(
     "--chessboard_size",
     type=str,
-    default="9x6",
+    default="5x7",
     help="Chessboard size as columns x rows (inner corners), e.g., '9x6'",
 )
 parser.add_argument(
     "--square_size",
     type=float,
-    default=8,
+    default=13.7,
     help="Size of a square in millimeters",
 )
 parser.add_argument(
@@ -43,6 +43,12 @@ parser.add_argument(
     "--force",
     help="Force overwrite calibrations",
     action="store_true",
+)
+parser.add_argument(
+    "--window_scale",
+    type=float,
+    default=0.7,
+    help="Scale of a window",
 )
 
 args = parser.parse_args()
@@ -171,7 +177,7 @@ print(
 
 # Set up windows for each camera feed
 for camera in cameras:
-    cv2.namedWindow(f"Camera_{camera['index']}", cv2.WINDOW_NORMAL)
+    cv2.namedWindow(f"Camera_{camera['index']}", cv2.WINDOW_AUTOSIZE)
 
 # Capture frames until any camera has not enough images for calibration
 while any(
@@ -187,7 +193,35 @@ while any(
             continue
 
         camera["frame"] = frame
-        cv2.imshow(f"Camera_{idx}", frame)
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        ret, corners, meta = cv2.findChessboardCornersSBWithMeta(
+            gray,
+            chessboard_size,
+            flags=cv2.CALIB_CB_MARKER,
+        )
+
+        if ret:
+            if meta.shape[0] != chessboard_rows:
+                corners = corners.reshape(-1, 2)
+                corners = corners.reshape(*chessboard_size, 2)
+                corners = corners.transpose(1, 0, 2)
+                corners = corners.reshape(-1, 2)
+                corners = corners[:, np.newaxis, :]
+            cv2.drawChessboardCorners(frame, chessboard_size, corners, ret)
+
+        camera["corners"] = corners
+
+        # Resize the frame before displaying
+        frame_height, frame_width = frame.shape[:2]
+        new_width = int(frame_width * args.window_scale)
+        new_height = int(frame_height * args.window_scale)
+        resized_frame = cv2.resize(
+            frame, (new_width, new_height), interpolation=cv2.INTER_AREA
+        )
+
+        # Display the resized frame
+        cv2.imshow(f"Camera_{idx}", resized_frame)
 
     key = cv2.waitKey(1)
     if key & 0xFF == ord("q"):
@@ -199,34 +233,18 @@ while any(
         for camera in cameras:
             idx = camera["index"]
             frame = camera["frame"]
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            corners = camera["corners"]
 
-            # Find the chessboard corners
-            ret, corners = cv2.findChessboardCorners(gray, chessboard_size, None)
-            if ret:
-                # Refine corner locations
-                corners2 = cv2.cornerSubPix(
-                    gray,
-                    corners,
-                    (11, 11),
-                    (-1, -1),
-                    criteria=(
-                        cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
-                        30,
-                        0.001,
-                    ),
-                )
-                camera["imgpoints"].append(corners2)
+            if corners is not None:
+                camera["imgpoints"].append(corners)
                 camera["calibration_count"] += 1
 
-                # Update image size and ensiure it's consistent
                 assert (
                     camera["image_size"] is None
                     or camera["image_size"] == gray.shape[::-1]
                 )
                 camera["image_size"] = gray.shape[::-1]
 
-                # Draw and display the corners
                 print(
                     f"Calibration image {camera['calibration_count']} collected for camera {idx}."
                 )
@@ -289,5 +307,5 @@ for camera in cameras:
 
 # Save calibrations
 with open(cameras_path, "w") as f:
-    json5.load(all_cameras_confs, f, indent=4)
+    json5.dump(all_cameras_confs, f, indent=4)
 print("Cameras file updated.")
