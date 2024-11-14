@@ -41,7 +41,7 @@ parser.add_argument(
 parser.add_argument(
     "--window_scale",
     type=float,
-    default=0.5,
+    default=0.7,
     help="Scale of a window",
 )
 parser.add_argument(
