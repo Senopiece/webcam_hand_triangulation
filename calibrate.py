@@ -38,11 +38,7 @@ parser.add_argument(
     help="Force overwrite calibrations",
     action="store_true",
 )
-parser.add_argument(
-    "--use_existing_intrinsics",
-    help="Use existing intrinsic parameters if available",
-    action="store_true",
-)
+
 
 args = parser.parse_args()
 cameras_path = args.file
@@ -112,7 +108,7 @@ print(
 )
 print("3. Press 'c' to capture calibration images for all cameras.")
 print(f"   Collect at least {calibration_images_needed} images.")
-print("4. The first position of the chessboard defines the center of the world.")
+print("4. A camera bacomes center of the world.")
 print("5. Calibration will be performed, and results saved.")
 
 for camera in cameras:
@@ -178,16 +174,15 @@ for camera in cameras:
     camera["cap"].release()
 cv2.destroyAllWindows()
 
-
-# Prepare object points (0,0,0), (1,0,0), ..., (cols-1,rows-1,0)
+# Prepare object points (same for all images)
 objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
 objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(-1, 2)
 objp *= square_size
 
-# Perform calibrations
+# Perform intrinsic calibrations
 for camera in cameras:
     idx = camera["index"]
-    print(f"Processing camera {idx}...")
+    print(f"Processing intrinsic calibration for camera {idx}...")
     cam_conf = next(conf for conf in cameras_confs if conf["index"] == idx)
 
     if args.use_existing_intrinsics and "intrinsic" in cam_conf:
@@ -222,46 +217,106 @@ for camera in cameras:
             "dist_coeffs": dist_coeffs.tolist(),
         }
 
-    # Now compute extrinsic parameters using solvePnP
-    print(f"Computing extrinsic parameters for camera {idx}...")
-    objpoints = [objp for _ in camera["imgpoints"]]
-    imgpoints = camera["imgpoints"]
+    # Store intrinsic parameters in the camera dictionary for later use
+    camera["mtx"] = mtx
+    camera["dist_coeffs"] = dist_coeffs
 
-    rvecs = []
-    tvecs = []
-    total_r_error = 0
+# Perform stereo calibration between each pair of cameras
+from itertools import combinations
 
-    for i in range(len(imgpoints)):
-        ret, rvec, tvec = cv2.solvePnP(objpoints[i], imgpoints[i], mtx, dist_coeffs)
-        rvecs.append(rvec)
-        tvecs.append(tvec)
+print("\n=== Performing Stereo Calibration ===")
+camera_pairs = list(combinations(cameras, 2))
 
-        # Calculate reprojection error
-        imgpoints2, _ = cv2.projectPoints(objpoints[i], rvec, tvec, mtx, dist_coeffs)
-        error = cv2.norm(imgpoints[i], imgpoints2, cv2.NORM_L2) / len(imgpoints2)
-        total_r_error += error
+for cam1, cam2 in camera_pairs:
+    idx1 = cam1["index"]
+    idx2 = cam2["index"]
+    print(f"\nStereo calibration between Camera {idx1} and Camera {idx2}...")
 
-    mean_r_error = total_r_error / len(imgpoints)
+    # Ensure that the number of image points is the same for both cameras
+    num_images = len(cam1["imgpoints"])
+    if num_images != len(cam2["imgpoints"]):
+        print(
+            f"Error: Number of calibration images for cameras {idx1} and {idx2} do not match."
+        )
+        continue
 
-    # Extract the first rvec and tvec for extrinsic parameters
-    rvec = rvecs[0]
-    tvec = tvecs[0]
-    R, _ = cv2.Rodrigues(rvec)
-    T_cm = tvec * 0.1  # Convert to centimeters
+    # Prepare object points and image points for stereo calibration
+    objpoints = [objp for _ in range(num_images)]
+    imgpoints1 = cam1["imgpoints"]
+    imgpoints2 = cam2["imgpoints"]
 
-    # Compute yaw, pitch, roll
-    _, _, _, _, _, _, euler_angles = cv2.decomposeProjectionMatrix(np.hstack((R, tvec)))
-    yaw_deg, pitch_deg, roll_deg = euler_angles.flatten()
-    yaw_rad = yaw_deg * np.pi / 180
-    pitch_rad = pitch_deg * np.pi / 180
-    roll_rad = roll_deg * np.pi / 180
+    # Retrieve intrinsic parameters
+    mtx1 = cam1["mtx"]
+    dist1 = cam1["dist_coeffs"]
+    mtx2 = cam2["mtx"]
+    dist2 = cam2["dist_coeffs"]
 
-    # Store extrinsic parameters
-    cam_conf["extrinsic"] = {
+    # Stereo calibration flags
+    stereo_flags = (
+        cv2.CALIB_FIX_INTRINSIC
+    )  # Assume intrinsic parameters are known and fixed
+
+    # Perform stereo calibration
+    ret, _, _, _, _, R, T, E, F = cv2.stereoCalibrate(
+        objpoints,
+        imgpoints1,
+        imgpoints2,
+        mtx1,
+        dist1,
+        mtx2,
+        dist2,
+        cam1["image_size"],
+        criteria=(
+            cv2.TERM_CRITERIA_MAX_ITER + cv2.TERM_CRITERIA_EPS,
+            100,
+            1e-5,
+        ),
+        flags=stereo_flags,
+    )
+
+    print(f"Stereo calibration between cameras {idx1} and {idx2} completed.")
+    print(f"Rotation matrix:\n{R}")
+    print(f"Translation vector:\n{T}")
+
+    # Store extrinsic parameters in the camera configurations
+    # Since we have multiple cameras, we'll define the world coordinate system
+    # with respect to the first camera (you can choose any reference)
+
+    # Compute yaw, pitch, roll from rotation matrix
+    from math import atan2, asin
+
+    sy = np.sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0])
+    singular = sy < 1e-6
+
+    if not singular:
+        x_angle = atan2(R[2, 1], R[2, 2])
+        y_angle = atan2(-R[2, 0], sy)
+        z_angle = atan2(R[1, 0], R[0, 0])
+    else:
+        x_angle = atan2(-R[1, 2], R[1, 1])
+        y_angle = atan2(-R[2, 0], sy)
+        z_angle = 0
+
+    # Convert to degrees
+    yaw_deg = np.degrees(z_angle)
+    pitch_deg = np.degrees(y_angle)
+    roll_deg = np.degrees(x_angle)
+
+    # Convert to radians
+    yaw_rad = np.radians(yaw_deg)
+    pitch_rad = np.radians(pitch_deg)
+    roll_rad = np.radians(roll_deg)
+
+    # Convert translation vector to centimeters
+    T_cm = T.flatten() * 0.1  # Assuming square_size is in millimeters
+
+    # Update the configuration for cam2 relative to cam1
+    cam2_conf = next(conf for conf in cameras_confs if conf["index"] == idx2)
+    cam2_conf["extrinsic"] = {
         "translation_centimeters": {
-            "x": float(T_cm[0][0]),
-            "y": float(T_cm[1][0]),
-            "z": float(T_cm[2][0]),
+            "x": float(T_cm[0]),
+            "y": float(T_cm[1]),
+            "z": float(T_cm[2]),
         },
         "rotation_radians": {
             "yaw": float(yaw_rad),
@@ -269,9 +324,17 @@ for camera in cameras:
             "roll": float(roll_rad),
         },
     }
-    print(
-        f"Calibration for camera {idx} complete with mean reprojection error: {mean_r_error}."
-    )
+
+    # Optionally, you can also update cam1's extrinsic parameters (assuming it's the reference)
+    cam1_conf = next(conf for conf in cameras_confs if conf["index"] == idx1)
+    if "extrinsic" not in cam1_conf:
+        # Set cam1 as the origin
+        cam1_conf["extrinsic"] = {
+            "translation_centimeters": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "rotation_radians": {"yaw": 0.0, "pitch": 0.0, "roll": 0.0},
+        }
+
+print("\nStereo calibration completed for all camera pairs.")
 
 # Save calibrations
 with open(cameras_path, "w") as f:
