@@ -412,5 +412,5 @@ for idx in camera_indices:
 
 # Save calibrations
 with open(cameras_path, "w") as f:
-    json5.load(cameras_confs, f, indent=4)
+    json5.dump(cameras_confs, f, indent=4)
 print("\nCameras file updated with extrinsic parameters.")
