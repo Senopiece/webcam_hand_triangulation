@@ -38,6 +38,17 @@ parser.add_argument(
     help="Force overwrite calibrations",
     action="store_true",
 )
+parser.add_argument(
+    "--window_scale_factor",
+    type=float,
+    default=0.5,
+    help="Scale of a window",
+)
+parser.add_argument(
+    "--use_existing_intrinsics",
+    help="Use existing intrinsics, dont overwrite them",
+    action="store_true",
+)
 
 
 args = parser.parse_args()
@@ -112,10 +123,7 @@ print("4. A camera bacomes center of the world.")
 print("5. Calibration will be performed, and results saved.")
 
 for camera in cameras:
-    cv2.namedWindow(
-        f"Camera_{camera['index']}",
-        cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO,
-    )
+    cv2.namedWindow(f"Camera_{camera['index']}", cv2.WINDOW_AUTOSIZE)
 
 # Capture frames and display recognized pattern points
 calibration_count = 0
@@ -152,7 +160,16 @@ while calibration_count < calibration_images_needed:
         if camera["image_size"] is None:
             camera["image_size"] = gray.shape[::-1]
 
-        cv2.imshow(f"Camera_{idx}", frame)
+        #  Resize the frame before displaying
+        frame_height, frame_width = frame.shape[:2]
+        new_width = int(frame_width * args.window_scaling_factor)
+        new_height = int(frame_height * args.window_scaling_factor)
+        resized_frame = cv2.resize(
+            frame, (new_width, new_height), interpolation=cv2.INTER_AREA
+        )
+
+        # Display the resized frame
+        cv2.imshow(f"Camera_{idx}", resized_frame)
 
     key = cv2.waitKey(1)
     if key & 0xFF == ord("q"):
