@@ -210,6 +210,9 @@ while any(
                 corners = corners[:, np.newaxis, :]
             cv2.drawChessboardCorners(frame, chessboard_size, corners, ret)
 
+        assert camera["image_size"] is None or camera["image_size"] == gray.shape[::-1]
+        camera["image_size"] = gray.shape[::-1]
+
         camera["corners"] = corners
 
         # Resize the frame before displaying
@@ -238,12 +241,6 @@ while any(
             if corners is not None:
                 camera["imgpoints"].append(corners)
                 camera["calibration_count"] += 1
-
-                assert (
-                    camera["image_size"] is None
-                    or camera["image_size"] == gray.shape[::-1]
-                )
-                camera["image_size"] = gray.shape[::-1]
 
                 print(
                     f"Calibration image {camera['calibration_count']} collected for camera {idx}."
