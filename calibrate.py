@@ -112,7 +112,10 @@ print("4. A camera bacomes center of the world.")
 print("5. Calibration will be performed, and results saved.")
 
 for camera in cameras:
-    cv2.namedWindow(f"Camera_{camera['index']}", cv2.WINDOW_AUTOSIZE)
+    cv2.namedWindow(
+        f"Camera_{camera['index']}",
+        cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO,
+    )
 
 # Capture frames and display recognized pattern points
 calibration_count = 0
