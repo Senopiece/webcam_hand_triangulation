@@ -39,7 +39,7 @@ parser.add_argument(
     action="store_true",
 )
 parser.add_argument(
-    "--window_scale_factor",
+    "--window_scale",
     type=float,
     default=0.5,
     help="Scale of a window",
@@ -162,8 +162,8 @@ while calibration_count < calibration_images_needed:
 
         #  Resize the frame before displaying
         frame_height, frame_width = frame.shape[:2]
-        new_width = int(frame_width * args.window_scaling_factor)
-        new_height = int(frame_height * args.window_scaling_factor)
+        new_width = int(frame_width * args.window_scale)
+        new_height = int(frame_height * args.window_scale)
         resized_frame = cv2.resize(
             frame, (new_width, new_height), interpolation=cv2.INTER_AREA
         )
