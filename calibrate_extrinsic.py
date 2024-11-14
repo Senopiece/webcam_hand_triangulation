@@ -1,5 +1,3 @@
-# a more powerful version of calibrate.py, but requires more work to do
-
 import sys
 import cv2
 import numpy as np
