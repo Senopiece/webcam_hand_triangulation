@@ -24,13 +24,13 @@ parser.add_argument(
 parser.add_argument(
     "--chessboard_size",
     type=str,
-    default="9x6",
+    default="5x7",
     help="Chessboard size as columns x rows (inner corners), e.g., '9x6'",
 )
 parser.add_argument(
     "--square_size",
     type=float,
-    default=8,
+    default=13.7,
     help="Size of a square in millimeters",
 )
 parser.add_argument(
@@ -38,6 +38,12 @@ parser.add_argument(
     type=int,
     default=None,
     help="Index of the pivot (reference) camera",
+)
+parser.add_argument(
+    "--window_scale",
+    type=float,
+    default=0.7,
+    help="Scale of a window",
 )
 
 args = parser.parse_args()
@@ -155,42 +161,59 @@ while True:
             print(f"Error: Could not read from camera {idx}")
             continue
         cameras[idx]["frame"] = frame
-        cv2.imshow(f"Camera_{idx}", frame)
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        ret, corners, meta = cv2.findChessboardCornersSBWithMeta(
+            gray,
+            chessboard_size,
+            flags=cv2.CALIB_CB_MARKER,
+        )
+
+        if ret:
+            if meta.shape[0] != chessboard_rows:
+                corners = corners.reshape(-1, 2)
+                corners = corners.reshape(*chessboard_size, 2)
+                corners = corners.transpose(1, 0, 2)
+                corners = corners.reshape(-1, 2)
+                corners = corners[:, np.newaxis, :]
+            cv2.drawChessboardCorners(frame, chessboard_size, corners, ret)
+
+        assert (
+            cameras[idx]["image_size"] is None
+            or cameras[idx]["image_size"] == gray.shape[::-1]
+        )
+        cameras[idx]["image_size"] = gray.shape[::-1]
+
+        cameras[idx]["corners"] = corners
+
+        # Resize the frame before displaying
+        frame_height, frame_width = frame.shape[:2]
+        new_width = int(frame_width * args.window_scale)
+        new_height = int(frame_height * args.window_scale)
+        resized_frame = cv2.resize(
+            frame, (new_width, new_height), interpolation=cv2.INTER_AREA
+        )
+
+        # Display the resized frame
+        cv2.imshow(f"Camera_{idx}", resized_frame)
 
     key = cv2.waitKey(1)
     if key & 0xFF == ord("q"):
         print("Exiting calibration script.")
         sys.exit()
+
     elif key & 0xFF == ord("c"):
         print("Capturing calibration images...")
         # Convert frames to grayscale and find chessboard corners
         detected_cameras = []
         corners_dict = {}
+
         for idx in cameras:
-            frame = cameras[idx]["frame"]
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            cameras[idx]["gray"] = gray
-            cameras[idx]["image_size"] = gray.shape[::-1]
-            ret, corners = cv2.findChessboardCorners(gray, chessboard_size, None)
-            if ret:
-                corners2 = cv2.cornerSubPix(
-                    gray,
-                    corners,
-                    (11, 11),
-                    (-1, -1),
-                    criteria=(
-                        cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
-                        30,
-                        0.001,
-                    ),
-                )
-                corners_dict[idx] = corners2
+            corners = cameras[idx]["corners"]
+            if corners is not None:
+                corners_dict[idx] = corners
                 detected_cameras.append(idx)
-                # Draw and display the corners
-                cv2.drawChessboardCorners(
-                    cameras[idx]["frame"], chessboard_size, corners2, ret
-                )
-                cv2.imshow(f"Camera_{idx}", cameras[idx]["frame"])
+
         if detected_cameras:
             print(f"Pattern detected in cameras: {detected_cameras}")
             # Update counts for camera pairs
@@ -200,6 +223,7 @@ while True:
                     (corners_dict[sorted_pair[0]], corners_dict[sorted_pair[1]])
                 )
                 pair_objpoints[sorted_pair].append(objp)
+
             # Print for observation
             counts = {k: len(v) for k, v in pair_imgpoints.items()}
             print("Current counts per camera pair:")
@@ -207,6 +231,7 @@ while True:
                 print(f"Cameras {pair[0]} and {pair[1]}: {counts[pair]} frames")
         else:
             print("Pattern not detected in any camera.")
+
     elif key & 0xFF == ord("s"):
         # Check if each camera is involved in at least one pair with sufficient images
         cameras_with_sufficient_pairs = set()
