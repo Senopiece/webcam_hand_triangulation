@@ -112,7 +112,8 @@ print(
 )
 print("3. Press 'c' to capture calibration images for all cameras.")
 print(f"   Collect at least {calibration_images_needed} images.")
-print("4. Calibration will be performed, and results saved.")
+print("4. The first position of the chessboard defines the center of the world.")
+print("5. Calibration will be performed, and results saved.")
 
 for camera in cameras:
     cv2.namedWindow(f"Camera_{camera['index']}", cv2.WINDOW_AUTOSIZE)
