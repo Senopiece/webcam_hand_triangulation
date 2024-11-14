@@ -138,6 +138,12 @@ def main():
         default="setup.json5",
         help="Path to the cameras declarations file",
     )
+    parser.add_argument(
+        "--window_scale",
+        type=float,
+        default=0.7,
+        help="Scale of a window",
+    )
     args = parser.parse_args()
     cameras_path = args.file
 
@@ -210,7 +216,17 @@ def main():
                             mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2),
                         )
                         break  # Only consider one right hand
-            cv2.imshow(f"Camera_{idx}", frame)
+
+            # Resize the frame before displaying
+            frame_height, frame_width = frame.shape[:2]
+            new_width = int(frame_width * args.window_scale)
+            new_height = int(frame_height * args.window_scale)
+            resized_frame = cv2.resize(
+                frame, (new_width, new_height), interpolation=cv2.INTER_AREA
+            )
+
+            # Display the resized frame
+            cv2.imshow(f"Camera_{idx}", resized_frame)
 
         key = cv2.waitKey(1)
         if key & 0xFF == ord("q"):

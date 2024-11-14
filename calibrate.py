@@ -160,7 +160,7 @@ while calibration_count < calibration_images_needed:
         if camera["image_size"] is None:
             camera["image_size"] = gray.shape[::-1]
 
-        #  Resize the frame before displaying
+        # Resize the frame before displaying
         frame_height, frame_width = frame.shape[:2]
         new_width = int(frame_width * args.window_scale)
         new_height = int(frame_height * args.window_scale)
