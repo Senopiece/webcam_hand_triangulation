@@ -24,13 +24,13 @@ parser.add_argument(
 parser.add_argument(
     "--chessboard_size",
     type=str,
-    default="5x7",
+    default="9x13",
     help="Chessboard size as columns x rows (inner corners), e.g., '9x6'",
 )
 parser.add_argument(
     "--square_size",
     type=float,
-    default=13.7,
+    default=13,
     help="Size of a square in millimeters",
 )
 parser.add_argument(
@@ -182,7 +182,12 @@ while True:
         ret_corners, corners, meta = cv2.findChessboardCornersSBWithMeta(
             gray,
             chessboard_size,
-            flags=cv2.CALIB_CB_MARKER,
+            flags=(
+                cv2.CALIB_CB_MARKER
+                | cv2.CALIB_CB_EXHAUSTIVE
+                | cv2.CALIB_CB_ACCURACY
+                | cv2.CALIB_CB_NORMALIZE_IMAGE
+            ),
         )
 
         if ret_corners:
