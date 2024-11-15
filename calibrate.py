@@ -178,6 +178,9 @@ while True:
             continue
         cameras[idx]["frame"] = frame
 
+    # Display frames in windows
+    for idx in cameras:
+        frame = cameras[idx]["frame"]
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         ret_corners, corners, meta = cv2.findChessboardCornersSBWithMeta(
             gray,
