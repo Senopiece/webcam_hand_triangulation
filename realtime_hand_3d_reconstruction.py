@@ -1,10 +1,12 @@
+import json
 import cv2
 import mediapipe as mp
 import numpy as np
 import json5
 import argparse
 import sys
-import matplotlib.pyplot as plt
+
+from kinematics import mp2bones
 
 
 def load_camera_parameters(cameras_file):
@@ -246,35 +248,9 @@ def main():
                     valid_indices.append(point_idx)
             if points_3d:
                 points_3d = np.array(points_3d)
-                # Visualize the 3D hand
-                fig = plt.figure()
-                ax = fig.add_subplot(111, projection="3d")
-                # Plot the landmarks
-                xs = points_3d[:, 0]
-                ys = points_3d[:, 1]
-                zs = points_3d[:, 2]
-                ax.scatter(xs, ys, zs, c="r", marker="o")
-                # Use mp_hands.HAND_CONNECTIONS for connections
-                for connection in mp_hands.HAND_CONNECTIONS:
-                    i, j = connection
-                    # Check if both landmarks were reconstructed
-                    if i in valid_indices and j in valid_indices:
-                        idx_i = valid_indices.index(i)
-                        idx_j = valid_indices.index(j)
-                        ax.plot(
-                            [points_3d[idx_i, 0], points_3d[idx_j, 0]],
-                            [points_3d[idx_i, 1], points_3d[idx_j, 1]],
-                            [points_3d[idx_i, 2], points_3d[idx_j, 2]],
-                            "b",
-                        )
-                # Set labels
-                ax.set_xlabel("X")
-                ax.set_ylabel("Y")
-                ax.set_zlabel("Z")
-                ax.set_title("3D Reconstructed Right Hand")
-                # Adjust the view angle for better visualization
-                ax.view_init(elev=20, azim=-60)
-                plt.show()
+                bones = mp2bones(points_3d)
+                with open("rotation_data.json", "w") as f:
+                    json.dump(bones, f, indent=4)
             else:
                 print("Not enough data to reconstruct hand in 3D.")
 
