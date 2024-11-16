@@ -186,6 +186,7 @@ def main():
 
     # Start capturing frames
     while True:
+        # Capture frames
         for idx in cameras:
             cap = cameras[idx]["cap"]
             ret, frame = cap.read()
@@ -193,7 +194,10 @@ def main():
                 print(f"Error: Could not read from camera {idx}")
                 continue
             cameras[idx]["frame"] = frame
-            # Process frame with MediaPipe
+
+        # Process frames with MediaPipe and display
+        for idx in cameras:
+            frame = cameras[idx]["frame"]
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             hands = cameras[idx]["hands_tracker"]
             results = hands.process(rgb_frame)
