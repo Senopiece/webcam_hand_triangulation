@@ -5,7 +5,6 @@ import json5
 import argparse
 import sys
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 
 
 def load_camera_parameters(cameras_file):
