@@ -1,3 +1,4 @@
+from itertools import combinations
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -89,14 +90,16 @@ def triangulate_points(cameras, point_idx):
     """
     projections = []
     points = []
-    for idx in cameras:
-        cam = cameras[idx]
+
+    for cam in cameras:
         if cam["hand_landmarks"] is not None:
             lm = cam["hand_landmarks"][point_idx]
+
             # Convert normalized coordinates to pixel coordinates
             h, w, _ = cam["frame"].shape
             x = lm.x * w
             y = lm.y * h
+
             # Undistort points
             undistorted = cv2.undistortPoints(
                 np.array([[[x, y]]], dtype=np.float32),
@@ -104,11 +107,14 @@ def triangulate_points(cameras, point_idx):
                 cam["dist"],
                 P=cam["mtx"],
             )
+
             points.append(undistorted[0][0])
+
             # Compute projection matrix
             RT = np.hstack((cam["R"], cam["T"]))
             P = cam["mtx"] @ RT
             projections.append(P)
+
     if len(projections) >= 2:
         # Prepare matrices for triangulation
         A = []
@@ -117,14 +123,21 @@ def triangulate_points(cameras, point_idx):
             x, y = points[i]
             A.append(x * P[2, :] - P[0, :])
             A.append(y * P[2, :] - P[1, :])
+
         A = np.array(A)
+
         # Solve using SVD
         U, S, Vt = np.linalg.svd(A)
         X = Vt[-1]
         X /= X[3]
-        return X[:3]
+
+        smallest_singular_value = S[-1]
+        return X[:3], smallest_singular_value
     else:
         return None
+
+
+num_landmarks = 21  # MediaPipe Hands has 21 landmarks
 
 
 def main():
@@ -154,7 +167,6 @@ def main():
 
     # Initialize video captures and MediaPipe Hands trackers
     mp_hands = mp.solutions.hands
-    mp_drawing = mp.solutions.drawing_utils
     for idx in cameras:
         # Initialize video capture
         cap = cv2.VideoCapture(idx)
@@ -195,7 +207,7 @@ def main():
                 continue
             cameras[idx]["frame"] = frame
 
-        # Process frames with MediaPipe and display
+        # Process frames with MediaPipe
         for idx in cameras:
             frame = cameras[idx]["frame"]
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -208,17 +220,81 @@ def main():
                 ):
                     if handedness.classification[0].label == "Right":
                         cameras[idx]["hand_landmarks"] = hand_landmarks.landmark
-                        # Draw landmarks using the provided code
-                        mp_drawing.draw_landmarks(
-                            frame,
-                            hand_landmarks,
-                            mp_hands.HAND_CONNECTIONS,
-                            mp_drawing.DrawingSpec(
-                                color=(0, 0, 255), thickness=2, circle_radius=4
-                            ),
-                            mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2),
-                        )
                         break  # Only consider one right hand
+
+        # Iterate all pairs of cameras to find best triangulation for each point
+        chosen_cameras = []
+        points_3d = []
+        for point_idx in range(num_landmarks):
+            best_point = None
+            best_score = float("-inf")
+            best_cams = None
+
+            for ids in combinations(cameras.keys(), 2):
+                cams = list(map(cameras.get, ids))
+                v = triangulate_points(cams, point_idx)
+                assert v is not None
+                point_3d, score = v
+
+                if score > best_score:
+                    best_point = point_3d
+                    best_score = score
+                    best_cams = ids
+
+            chosen_cameras.append(best_cams)
+            points_3d.append(best_point)
+
+        # Draw landmarks and display frames
+        for idx in cameras:
+            frame = cameras[idx]["frame"]
+
+            # Camera matrix and extrinsics
+            cam = cameras[idx]
+            RT = np.hstack((cam["R"], cam["T"]))  # Rotation and translation
+            P = cam["mtx"] @ RT  # Projection matrix
+
+            # Store reprojected 2D landmarks for drawing connections
+            reprojected_points = {}
+
+            for point_idx, point_3d in enumerate(points_3d):
+                # Reproject the 3D point to 2D
+                point_3d_homogeneous = np.append(point_3d, 1)  # Make homogeneous
+                reprojected = P @ point_3d_homogeneous
+                reprojected /= reprojected[2]  # Normalize
+
+                # Extract 2D coordinates
+                x, y = int(reprojected[0]), int(reprojected[1])
+
+                # Store reprojected 2D point for connections
+                reprojected_points[point_idx] = (x, y)
+
+            # Draw connections between landmarks first
+            for connection in mp_hands.HAND_CONNECTIONS:
+                start_idx, end_idx = connection
+                if start_idx in reprojected_points and end_idx in reprojected_points:
+                    start_point = reprojected_points[start_idx]
+                    end_point = reprojected_points[end_idx]
+                    cv2.line(
+                        frame,
+                        start_point,
+                        end_point,
+                        color=(255, 255, 255),
+                        thickness=2,
+                    )
+
+            # Draw landmarks (circles) on top of connections
+            for point_idx, point_3d in enumerate(points_3d):
+                # Reproject the 3D point to 2D (reuse previously computed values)
+                x, y = reprojected_points[point_idx]
+
+                # Check if this camera was chosen for this point
+                if idx in chosen_cameras[point_idx]:
+                    color = (0, 255, 0)  # Green for chosen cameras
+                else:
+                    color = (255, 0, 0)  # Blue for other cameras
+
+                # Draw the landmark
+                cv2.circle(frame, (x, y), radius=5, color=color, thickness=-1)
 
             # Resize the frame before displaying
             frame_height, frame_width = frame.shape[:2]
@@ -237,7 +313,6 @@ def main():
         elif key & 0xFF == ord("s"):
             # Collect landmarks from all cameras
             points_3d = []
-            num_landmarks = 21  # MediaPipe Hands has 21 landmarks
             valid_indices = []
             for point_idx in range(num_landmarks):
                 point_3d = triangulate_points(cameras, point_idx)
