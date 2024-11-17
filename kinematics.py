@@ -1,15 +1,33 @@
 import numpy as np
 
 
-def direction2euler(p1: np.ndarray, p2: np.ndarray):
-    assert p1.shape == (3,) and p2.shape == (3,), "Input points must have shape (3,)."
+def decart2polar(p: np.ndarray):
+    assert p.shape == (3,), "Input point must have shape (3,)."
 
-    direction = p2 - p1
-    direction /= np.linalg.norm(direction)
-    yaw = np.arctan2(direction[1], direction[0])
-    pitch = np.arcsin(direction[2])
+    direction = p.copy()
 
-    return yaw, pitch
+    # Compute the radial distance (magnitude of the direction vector)
+    r = np.linalg.norm(direction)
+    if r == 0:
+        raise ValueError("Points p1 and p2 are identical; direction is undefined.")
+
+    # Compute azimuth (angle in the xy-plane from the x-axis)
+    azimuth = np.arctan2(direction[1], direction[0])
+
+    # Compute elevation (angle from the xy-plane)
+    elevation = np.arcsin(direction[2] / r)
+
+    return r, azimuth, elevation
+
+
+def polar2decart(r, azimuth, elevation):
+    return np.asarray(
+        [
+            r * np.cos(elevation) * np.cos(azimuth),
+            r * np.cos(elevation) * np.sin(azimuth),
+            r * np.sin(elevation),
+        ]
+    )
 
 
 def bone_mp_point_corresondence():
@@ -29,7 +47,13 @@ def mp2bones(points_3d: np.ndarray):
         p1 = points_3d[p1i]
         p2 = points_3d[p2i]
 
-        yaw, pitch = direction2euler(p1, p2)
-        res[label] = {"pitch": pitch, "yaw": yaw}
+        _, azimuth, elevation = decart2polar(p2 - p1)
+        res[label] = {"azimuth": azimuth, "elevation": elevation}
 
     return res
+
+
+if __name__ == "__main__":
+    p = np.array([9, 8, 3])
+    r, azimuth, elevation = decart2polar(p)
+    print(polar2decart(r, azimuth, elevation), p)
