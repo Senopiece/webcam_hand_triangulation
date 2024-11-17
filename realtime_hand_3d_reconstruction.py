@@ -227,19 +227,56 @@ def main():
         points_3d = []
         for point_idx in range(num_landmarks):
             best_point = None
-            best_score = float("-inf")
+            best_score = float("+inf")
             best_cams = None
 
-            for ids in combinations(cameras.keys(), 2):
+            for ids in combinations(
+                filter(
+                    lambda idx: cameras[idx]["hand_landmarks"] is not None,
+                    cameras.keys(),
+                ),
+                2,
+            ):
                 cams = list(map(cameras.get, ids))
                 v = triangulate_points(cams, point_idx)
                 assert v is not None
                 point_3d, score = v
 
-                if score > best_score:
+                mean_reprojection_error = 0
+                for cam in cams:
+                    # Camera matrix and extrinsics
+                    RT = np.hstack((cam["R"], cam["T"]))  # Rotation and translation
+                    P = cam["mtx"] @ RT  # Projection matrix
+
+                    # Reproject the 3D point to 2D
+                    point_3d_homogeneous = np.append(point_3d, 1)  # Make homogeneous
+                    reprojected = P @ point_3d_homogeneous
+                    reprojected /= reprojected[2]  # Normalize
+
+                    # Extract 2D coordinates
+                    x1, y1 = int(reprojected[0]), int(reprojected[1])
+
+                    lm = cam["hand_landmarks"][point_idx]
+                    h, w, _ = cam["frame"].shape
+                    x0 = lm.x * w
+                    y0 = lm.y * h
+
+                    # Compute the error
+                    reprojection_error = np.linalg.norm(
+                        np.array([x1, y1]) - np.array([x0, y0])
+                    )
+
+                    mean_reprojection_error += reprojection_error
+
+                mean_reprojection_error /= len(cams)
+
+                if mean_reprojection_error < best_score:
                     best_point = point_3d
                     best_score = score
                     best_cams = ids
+
+            if best_point is None:
+                break
 
             chosen_cameras.append(best_cams)
             points_3d.append(best_point)
@@ -248,53 +285,58 @@ def main():
         for idx in cameras:
             frame = cameras[idx]["frame"]
 
-            # Camera matrix and extrinsics
-            cam = cameras[idx]
-            RT = np.hstack((cam["R"], cam["T"]))  # Rotation and translation
-            P = cam["mtx"] @ RT  # Projection matrix
+            # Draw landmarks if can
+            if len(points_3d) == 21:
+                # Camera matrix and extrinsics
+                cam = cameras[idx]
+                RT = np.hstack((cam["R"], cam["T"]))  # Rotation and translation
+                P = cam["mtx"] @ RT  # Projection matrix
 
-            # Store reprojected 2D landmarks for drawing connections
-            reprojected_points = {}
+                # Store reprojected 2D landmarks for drawing connections
+                reprojected_points = {}
 
-            for point_idx, point_3d in enumerate(points_3d):
-                # Reproject the 3D point to 2D
-                point_3d_homogeneous = np.append(point_3d, 1)  # Make homogeneous
-                reprojected = P @ point_3d_homogeneous
-                reprojected /= reprojected[2]  # Normalize
+                for point_idx, point_3d in enumerate(points_3d):
+                    # Reproject the 3D point to 2D
+                    point_3d_homogeneous = np.append(point_3d, 1)  # Make homogeneous
+                    reprojected = P @ point_3d_homogeneous
+                    reprojected /= reprojected[2]  # Normalize
 
-                # Extract 2D coordinates
-                x, y = int(reprojected[0]), int(reprojected[1])
+                    # Extract 2D coordinates
+                    x, y = int(reprojected[0]), int(reprojected[1])
 
-                # Store reprojected 2D point for connections
-                reprojected_points[point_idx] = (x, y)
+                    # Store reprojected 2D point for connections
+                    reprojected_points[point_idx] = (x, y)
 
-            # Draw connections between landmarks first
-            for connection in mp_hands.HAND_CONNECTIONS:
-                start_idx, end_idx = connection
-                if start_idx in reprojected_points and end_idx in reprojected_points:
-                    start_point = reprojected_points[start_idx]
-                    end_point = reprojected_points[end_idx]
-                    cv2.line(
-                        frame,
-                        start_point,
-                        end_point,
-                        color=(255, 255, 255),
-                        thickness=2,
-                    )
+                # Draw connections between landmarks first
+                for connection in mp_hands.HAND_CONNECTIONS:
+                    start_idx, end_idx = connection
+                    if (
+                        start_idx in reprojected_points
+                        and end_idx in reprojected_points
+                    ):
+                        start_point = reprojected_points[start_idx]
+                        end_point = reprojected_points[end_idx]
+                        cv2.line(
+                            frame,
+                            start_point,
+                            end_point,
+                            color=(255, 255, 255),
+                            thickness=2,
+                        )
 
-            # Draw landmarks (circles) on top of connections
-            for point_idx, point_3d in enumerate(points_3d):
-                # Reproject the 3D point to 2D (reuse previously computed values)
-                x, y = reprojected_points[point_idx]
+                # Draw landmarks (circles) on top of connections
+                for point_idx, point_3d in enumerate(points_3d):
+                    # Reproject the 3D point to 2D (reuse previously computed values)
+                    x, y = reprojected_points[point_idx]
 
-                # Check if this camera was chosen for this point
-                if idx in chosen_cameras[point_idx]:
-                    color = (0, 255, 0)  # Green for chosen cameras
-                else:
-                    color = (255, 0, 0)  # Blue for other cameras
+                    # Check if this camera was chosen for this point
+                    if idx in chosen_cameras[point_idx]:
+                        color = (0, 255, 0)  # Green for chosen cameras
+                    else:
+                        color = (255, 0, 0)  # Blue for other cameras
 
-                # Draw the landmark
-                cv2.circle(frame, (x, y), radius=5, color=color, thickness=-1)
+                    # Draw the landmark
+                    cv2.circle(frame, (x, y), radius=5, color=color, thickness=-1)
 
             # Resize the frame before displaying
             frame_height, frame_width = frame.shape[:2]
@@ -312,14 +354,7 @@ def main():
             break
         elif key & 0xFF == ord("s"):
             # Collect landmarks from all cameras
-            points_3d = []
-            valid_indices = []
-            for point_idx in range(num_landmarks):
-                point_3d = triangulate_points(cameras, point_idx)
-                if point_3d is not None:
-                    points_3d.append(point_3d)
-                    valid_indices.append(point_idx)
-            if points_3d:
+            if len(points_3d) == 21:
                 points_3d = np.array(points_3d)
                 # Visualize the 3D hand
                 fig = plt.figure()
@@ -333,15 +368,12 @@ def main():
                 for connection in mp_hands.HAND_CONNECTIONS:
                     i, j = connection
                     # Check if both landmarks were reconstructed
-                    if i in valid_indices and j in valid_indices:
-                        idx_i = valid_indices.index(i)
-                        idx_j = valid_indices.index(j)
-                        ax.plot(
-                            [points_3d[idx_i, 0], points_3d[idx_j, 0]],
-                            [points_3d[idx_i, 1], points_3d[idx_j, 1]],
-                            [points_3d[idx_i, 2], points_3d[idx_j, 2]],
-                            "b",
-                        )
+                    ax.plot(
+                        [points_3d[i, 0], points_3d[j, 0]],
+                        [points_3d[i, 1], points_3d[j, 1]],
+                        [points_3d[i, 2], points_3d[j, 2]],
+                        "b",
+                    )
                 # Set labels
                 ax.set_xlabel("X")
                 ax.set_ylabel("Y")
