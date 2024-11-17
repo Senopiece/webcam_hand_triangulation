@@ -351,18 +351,18 @@ def main():
             # Display the resized frame
             cv2.imshow(f"Camera_{idx}", resized_frame)
 
+        # Visualize landmarks
+        if len(points_3d) == 21:
+            points_3d = np.array(points_3d)
+            bones = mp2bones(points_3d)
+            with open("rotation_data.json", "w") as f:
+                json.dump(bones, f, indent=4)
+        else:
+            print("Not enough data to reconstruct hand in 3D.")
+
         key = cv2.waitKey(1)
         if key & 0xFF == ord("q"):
             break
-        elif key & 0xFF == ord("s"):
-            # Collect landmarks from all cameras
-            if len(points_3d) == 21:
-                points_3d = np.array(points_3d)
-                bones = mp2bones(points_3d)
-                with open("rotation_data.json", "w") as f:
-                    json.dump(bones, f, indent=4)
-            else:
-                print("Not enough data to reconstruct hand in 3D.")
 
     # Release resources
     for idx in cameras:

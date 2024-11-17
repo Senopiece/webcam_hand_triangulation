@@ -30,6 +30,6 @@ def mp2bones(points_3d: np.ndarray):
         p2 = points_3d[p2i]
 
         yaw, pitch = direction2euler(p1, p2)
-        res[label] = {"x": 0, "y": pitch, "z": yaw}
+        res[label] = {"pitch": pitch, "yaw": yaw}
 
     return res
