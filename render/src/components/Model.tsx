@@ -16,8 +16,8 @@ export function Model() {
 
     gltf.scene.traverse(node => {
       // Check if the current node's name exists in our bones positions
-      if (bonesPositions[node.name]) {
-        const position = bonesPositions[node.name];
+      if (bonesPositions[node.userData.name]) {
+        const position = bonesPositions[node.userData.name];
         node.position.set(...position);
       }
     });
