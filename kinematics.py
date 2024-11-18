@@ -68,7 +68,7 @@ def calculate_euler_angles(target_point):
         rotation_matrix[1, 0], rotation_matrix[1, 1]
     )  # yaw = atan2(m[1,0], m[1,1])
 
-    return np.array([pitch, roll, yaw])
+    return [pitch, roll, yaw]
 
 
 if __name__ == "__main__":
