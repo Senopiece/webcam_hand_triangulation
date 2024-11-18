@@ -7,7 +7,9 @@ import json5
 import argparse
 import sys
 
-from kinematics import mp2bones
+import requests
+
+from kinematics import points_3d_to_bones_rotations
 
 
 def load_camera_parameters(cameras_file):
@@ -354,9 +356,11 @@ def main():
         # Visualize landmarks
         if len(points_3d) == 21:
             points_3d = np.array(points_3d)
-            bones = mp2bones(points_3d)
-            with open("rotation_data.json", "w") as f:
-                json.dump(bones, f, indent=4)
+            bones = points_3d_to_bones_rotations(points_3d)
+            resp = requests.post("http://localhost:3000/api/bones", json=bones)
+            if resp.status_code != 200:
+                print(f"Failed to send data. Status code: {resp.status_code}")
+                print(resp.text)
         else:
             print("Not enough data to reconstruct hand in 3D.")
 

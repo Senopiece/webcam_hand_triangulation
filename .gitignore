@@ -176,6 +176,5 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python
 
 setup.json5
-rotation_data.json
 *.blend1
 *.blend2
