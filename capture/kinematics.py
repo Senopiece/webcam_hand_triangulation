@@ -2,11 +2,11 @@ import numpy as np
 
 
 def bone_mp_point_corresondence():
-    idx = 0
-    for label in ["Index", "Middle", "Ring", "Pinky"]:
-        for i in range(4):
-            idx += 1
-            yield f"{label}.{i}", 0 if i == 0 else idx - 1, idx
+    # idx = 0
+    # for label in ["Index", "Middle", "Ring", "Pinky"]:
+    #     for i in range(4):
+    #         idx += 1
+    #         yield f"{label}.{i}", 0 if i == 0 else idx - 1, idx
 
     yield "Thumb.0", 0, 2
     yield "Thumb.1", 2, 3
