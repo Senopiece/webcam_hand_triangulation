@@ -1,5 +1,4 @@
 from itertools import combinations
-import json
 import cv2
 import mediapipe as mp
 import numpy as np
