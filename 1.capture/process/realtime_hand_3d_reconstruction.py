@@ -6,6 +6,7 @@ import numpy as np
 import json5
 import argparse
 import sys
+import time
 
 import requests
 
@@ -188,6 +189,10 @@ def main():
         print("Need at least two cameras with calibration data.")
         sys.exit(1)
 
+    # Initialize FPS tracking variables
+    fps_counter = 0
+    fps_display_time = time.time()
+
     def best_stereo_triangulate_point(cameras_ids, point_idx):
         """
         Triangulate 3D point from multiple camera views.
@@ -347,9 +352,8 @@ def main():
                 chosen_cameras.append(chosen)
                 points_3d.append(point_3d)
 
-        # Draw landmarks and display frames
-        for idx in cameras:
-            cam = cameras[idx]
+        # Draw landmarks
+        for cam in cameras.values():
             frame = cam["frame"]
 
             # Draw landmarks if can
@@ -359,8 +363,8 @@ def main():
 
                 for point_idx, point_3d in enumerate(points_3d):
                     x, y = project(cam, point_3d)
-                    x, y = max(min(int(x), cam["frame"].shape[1]), 0), max(
-                        min(int(y), cam["frame"].shape[0]), 0
+                    x, y = max(min(int(x), frame.shape[1]), 0), max(
+                        min(int(y), frame.shape[0]), 0
                     )
                     reprojected_points[point_idx] = (x, y)
 
@@ -395,6 +399,18 @@ def main():
                     # Draw the landmark
                     cv2.circle(frame, (x, y), radius=5, color=color, thickness=-1)
 
+        # FPS counter update every second
+        fps_counter += 1
+        current_time = time.time()
+        if current_time - fps_display_time >= 1.0:
+            fps_display_time = current_time
+            fps = fps_counter
+            fps_counter = 0
+
+        # Display frames
+        for idx in cameras:
+            frame = cameras[idx]["frame"]
+
             # Resize the frame before displaying
             frame_height, frame_width = frame.shape[:2]
             new_width = int(frame_width * args.window_scale)
@@ -403,10 +419,21 @@ def main():
                 frame, (new_width, new_height), interpolation=cv2.INTER_AREA
             )
 
+            # Add FPS to the frame
+            cv2.putText(
+                resized_frame,
+                f"FPS: {fps}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                1,
+            )
+
             # Display the resized frame
             cv2.imshow(f"Camera_{idx}", resized_frame)
 
-        # Visualize landmarks
+        # Visualize 3d landmarks
         if do_render:
             if len(points_3d) == 21:
                 points_3d = np.array(points_3d)
