@@ -1,4 +1,4 @@
-# Merged Camera Calibration Script (Intrinsic and Extrinsic)
+# Merged Camera Calibration Script (Intrinsic and Extrinsic) - With Direct Pairwise Overlap Assertions
 
 import sys
 import cv2
@@ -103,7 +103,7 @@ for camera_conf in cameras_confs:
     focus_supported = cap.set(cv2.CAP_PROP_FOCUS, focus_value)
     if not focus_supported:
         print(
-            f"Camera {idx} does not support manual focus! (or an invalid focus value provided)",
+            f"Camera {idx} does not support manual focus! (or invalid focus value provided)",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -140,19 +140,18 @@ camera_image_counts = {idx: 0 for idx in camera_indices}
 # Prepare data structures
 pair_imgpoints = {pair: [] for pair in itertools.combinations(camera_indices, 2)}
 pair_objpoints = {pair: [] for pair in itertools.combinations(camera_indices, 2)}
-pair_transformations = {}  # To store relative transformations (R, T)
 
 print()
 print("=== Camera Calibration Script ===")
 print("Instructions:")
 print(
-    f"1. Ensure that the calibration pattern ({chessboard_size[0]}x{chessboard_size[1]} chessboard of {square_size}mm squares) is visible in as many cameras as possible."
+    f"1. Ensure that the calibration pattern ({chessboard_size[0]}x{chessboard_size[1]} chessboard of {square_size}mm squares) is visible in all cameras you want to calibrate."
 )
 print("2. Press 'c' to capture calibration images from all cameras.")
 print("   The script will print which cameras detected the pattern.")
 print("3. Press 's' to perform calibration when ready.")
 print(
-    f"   Calibration requires at least {calibration_images_needed} images per camera for intrinsic calibration, and sufficient images per camera pair."
+    f"   Calibration requires at least {calibration_images_needed} images per camera and each pair of cameras must have at least {calibration_images_needed} shared frames."
 )
 print(
     "4. After calibration, the script will write the intrinsic and extrinsic parameters back to the cameras file."
@@ -178,7 +177,7 @@ while True:
             continue
         cameras[idx]["frame"] = frame
 
-    # Display frames in windows
+    # Display and detect corners
     for idx in cameras:
         frame = cameras[idx]["frame"]
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -194,6 +193,7 @@ while True:
         )
 
         if ret_corners:
+            # Adjust corners if needed
             if meta.shape[0] != chessboard_rows:
                 corners = corners.reshape(-1, 2)
                 corners = corners.reshape(*chessboard_size, 2)
@@ -217,8 +217,6 @@ while True:
         resized_frame = cv2.resize(
             frame, (new_width, new_height), interpolation=cv2.INTER_AREA
         )
-
-        # Display the resized frame
         cv2.imshow(f"Camera_{idx}", resized_frame)
 
     key = cv2.waitKey(1)
@@ -263,7 +261,7 @@ while True:
             print("Pattern not detected in any camera.")
 
     elif key & 0xFF == ord("s"):
-        # Check if each camera has enough images for intrinsic calibration
+        # Check if each camera has enough images
         cameras_with_sufficient_images = [
             idx
             for idx in camera_indices
@@ -278,12 +276,20 @@ while True:
                 print(f"Camera {idx}: {camera_image_counts[idx]} frames")
             print(f"Need at least {calibration_images_needed} frames per camera.")
             continue
-        else:
-            print("\nProceeding to calibration...")
-            print("Number of frames collected per camera:")
-            for idx in camera_indices:
-                print(f"Camera {idx}: {camera_image_counts[idx]} frames")
-            break
+
+        # Assert that each pair of cameras has enough overlap
+        for pair, elems in pair_imgpoints.items():
+            if len(elems) < calibration_images_needed:
+                print(
+                    f"Not enough frames for camera pair {pair}. Need at least {calibration_images_needed}."
+                )
+                continue
+
+        print("\nProceeding to calibration...")
+        print("Number of frames collected per camera:")
+        for idx in camera_indices:
+            print(f"Camera {idx}: {camera_image_counts[idx]} frames")
+        break
 
 # Release resources after loop
 for idx in cameras:
@@ -328,23 +334,17 @@ for idx in cameras:
             "dist_coeffs": dist_coeffs.tolist(),
         }
 
-    # Store intrinsic parameters in the camera dictionary for later use
+    # Store intrinsic parameters for later use
     camera["mtx"] = mtx
     camera["dist_coeffs"] = dist_coeffs
 
-print("\nPerforming stereo calibration for all camera pairs with sufficient data...")
+print("\nPerforming stereo calibration for all camera pairs...")
+pair_transformations = {}
 for pair, elems in pair_imgpoints.items():
-    if len(elems) < calibration_images_needed:
-        print(f"Not enough data to calibrate cameras {pair[0]} and {pair[1]}.")
-        continue
     idx1, idx2 = pair
     objpoints = pair_objpoints[pair]
     imgpoints1 = [imgpair[0] for imgpair in elems]
     imgpoints2 = [imgpair[1] for imgpair in elems]
-
-    # Get intrinsic parameters
-    cam1_conf = next(conf for conf in cameras_confs if conf["index"] == idx1)
-    cam2_conf = next(conf for conf in cameras_confs if conf["index"] == idx2)
 
     mtx1 = cameras[idx1]["mtx"]
     dist1 = cameras[idx1]["dist_coeffs"]
@@ -370,79 +370,33 @@ for pair, elems in pair_imgpoints.items():
         flags=cv2.CALIB_FIX_INTRINSIC,
     )
 
-    # Store the relative transformation
     pair_transformations[pair] = {"R": R, "T": T}
-
     print(f"Stereo calibration between cameras {idx1} and {idx2} completed.")
 
-# Build camera graph
-camera_graph = {idx: [] for idx in camera_indices}
-for pair in pair_transformations:
-    idx1, idx2 = pair
-    camera_graph[idx1].append(idx2)
-    camera_graph[idx2].append(idx1)
+# Since each pair of cameras is guaranteed to have sufficient overlap,
+# we can derive extrinsics directly from the pivot camera.
+# For each camera other than the pivot, find the transformation with the pivot camera directly.
 
-
-# Function to find paths from pivot to other cameras
-def find_transformation(pivot_idx, target_idx, visited=None):
-    if visited is None:
-        visited = set()
-    visited.add(pivot_idx)
-    if pivot_idx == target_idx:
-        return {"R": np.eye(3), "T": np.zeros((3, 1))}
-    for neighbor in camera_graph[pivot_idx]:
-        if neighbor in visited:
-            continue
-        pair = tuple(sorted((pivot_idx, neighbor)))
-        rel_trans = pair_transformations.get(pair)
-        if rel_trans is None:
-            continue
-        res = find_transformation(neighbor, target_idx, visited)
-        if res is not None:
-            # Compose transformations
-            if pivot_idx < neighbor:
-                # Transformation from pivot to neighbor
-                R_pn = rel_trans["R"]
-                T_pn = rel_trans["T"]
-            else:
-                # Need to invert the transformation
-                R_pn = rel_trans["R"].T
-                T_pn = -rel_trans["R"].T @ rel_trans["T"]
-            # Compose
-            R = res["R"] @ R_pn
-            T = res["R"] @ T_pn + res["T"]
-            return {"R": R, "T": T}
-    return None
-
-
-# Compute transformations from pivot camera to all other cameras
 print("\nComputing transformations relative to the pivot camera...")
-for idx in camera_indices:
-    if idx == reference_idx:
-        # Pivot camera, identity transformation
-        cam_conf = next(conf for conf in cameras_confs if conf["index"] == idx)
-        cam_conf["extrinsic"] = {
-            "translation_centimeters": {
-                "x": 0.0,
-                "y": 0.0,
-                "z": 0.0,
-            },
-            "rotation_radians": {
-                "yaw": 0.0,
-                "pitch": 0.0,
-                "roll": 0.0,
-            },
-        }
-        continue
-    # Find transformation path
-    res = find_transformation(reference_idx, idx)
-    if res is None:
-        print(f"Could not find a path from camera {reference_idx} to camera {idx}")
-        continue
-    R = res["R"]
-    T = res["T"]
 
-    # Convert rotation matrix to Euler angles (yaw, pitch, roll)
+# Pivot camera extrinsic is identity
+pivot_cam_conf = next(conf for conf in cameras_confs if conf["index"] == reference_idx)
+pivot_cam_conf["extrinsic"] = {
+    "translation_centimeters": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0,
+    },
+    "rotation_radians": {
+        "yaw": 0.0,
+        "pitch": 0.0,
+        "roll": 0.0,
+    },
+}
+
+
+# Helper function to convert rotation matrix to Euler angles (Z-Y-X Tait-Bryan)
+def rotation_matrix_to_euler(R):
     sy = np.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2)
     singular = sy < 1e-6
     if not singular:
@@ -453,11 +407,29 @@ for idx in camera_indices:
         yaw = np.arctan2(-R[1, 2], R[1, 1])
         pitch = np.arctan2(-R[2, 0], sy)
         roll = 0
+    return yaw, pitch, roll
 
-    # Convert translation to centimeters
-    T_cm = T.flatten() * 0.1  # Assuming T is in millimeters
 
-    # Store extrinsic parameters
+# Compute transformations for each camera relative to the pivot
+for idx in camera_indices:
+    if idx == reference_idx:
+        continue
+
+    # Since every pair has frames in common, we can directly use the pair (pivot, idx)
+    sorted_pair = tuple(sorted((reference_idx, idx)))
+    rel_trans = pair_transformations[sorted_pair]
+    R = rel_trans["R"]
+    T = rel_trans["T"]
+
+    # If pivot < idx, R and T describe pivot->idx directly
+    # If pivot > idx, we need to invert
+    if reference_idx > idx:
+        R = R.T
+        T = -R @ T
+
+    yaw, pitch, roll = rotation_matrix_to_euler(R)
+    T_cm = T.flatten() * 0.1  # Convert mm to cm
+
     cam_conf = next(conf for conf in cameras_confs if conf["index"] == idx)
     cam_conf["extrinsic"] = {
         "translation_centimeters": {
