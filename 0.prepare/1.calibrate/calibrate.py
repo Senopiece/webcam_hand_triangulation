@@ -1,11 +1,15 @@
 # Merged Camera Calibration Script (Intrinsic and Extrinsic) - With Direct Pairwise Overlap Assertions
 
+# Approach is fixed to specific camera positioning such that all cameras can see the pattern at the same time
+# Also it ignores frames where a camera does not detect the pattern for simplicity
+
+# TODO: Calibrate using global optimization (for now stereoCalibration is used that utilizes only information of each camera with the pivot camera, but with using global optimization we can utilize the data between other pairs to improve accuracy and consistency among the cameras between each other)
+
 import sys
 import cv2
 import numpy as np
 import json5
 import argparse
-import itertools
 
 # Set up argument parser to accept various parameters
 parser = argparse.ArgumentParser(description="Camera Calibration Script")
@@ -113,7 +117,6 @@ for camera_conf in cameras_confs:
         "index": idx,
         "cap": cap,
         "image_size": None,
-        "imgpoints": [],  # For intrinsic calibration
         "corners": None,
     }
 
@@ -134,53 +137,49 @@ else:
 
 print(f"\nUsing camera {reference_idx} as the pivot (reference) camera.")
 
-# Initialize counts
-camera_image_counts = {idx: 0 for idx in camera_indices}
-
-# Prepare data structures
-pair_imgpoints = {pair: [] for pair in itertools.combinations(camera_indices, 2)}
-pair_objpoints = {pair: [] for pair in itertools.combinations(camera_indices, 2)}
-
 print()
 print("=== Camera Calibration Script ===")
 print("Instructions:")
 print(
     f"1. Ensure that the calibration pattern ({chessboard_size[0]}x{chessboard_size[1]} chessboard of {square_size}mm squares) is visible in all cameras you want to calibrate."
 )
-print("2. Press 'c' to capture calibration images from all cameras.")
+print("2. Press 'c' to capture calibration images.")
 print("   The script will print which cameras detected the pattern.")
 print("3. Press 's' to perform calibration when ready.")
 print(
-    f"   Calibration requires at least {calibration_images_needed} images per camera and each pair of cameras must have at least {calibration_images_needed} shared frames."
+    f"   Calibration requires at least {calibration_images_needed} captures when all cameras detect the pattern."
+    f"   Captures when a camera does not detect the pattern will be skipped."
 )
 print(
     "4. After calibration, the script will write the intrinsic and extrinsic parameters back to the cameras file."
 )
+print()
 
 # Set up windows for each camera feed
 for idx in cameras:
     cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_NORMAL)
 
-# Prepare object points based on the real-world dimensions of the calibration pattern
-objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
-objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(-1, 2)
-objp *= square_size
+shots = []
 
 # Capture images
 while True:
     # Read frames from all cameras
-    for idx in cameras:
-        cap = cameras[idx]["cap"]
+    for cam in cameras.values():
+        cap = cam["cap"]
         ret, frame = cap.read()
         if not ret:
             print(f"Error: Could not read from camera {idx}")
             continue
-        cameras[idx]["frame"] = frame
+
+        cam["frame"] = frame
 
     # Display and detect corners
     for idx in cameras:
-        frame = cameras[idx]["frame"]
+        cam = cameras[idx]
+
+        frame = cam["frame"]
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
         ret_corners, corners, meta = cv2.findChessboardCornersSBWithMeta(
             gray,
             chessboard_size,
@@ -193,7 +192,6 @@ while True:
         )
 
         if ret_corners:
-            # Adjust corners if needed
             if meta.shape[0] != chessboard_rows:
                 corners = corners.reshape(-1, 2)
                 corners = corners.reshape(*chessboard_size, 2)
@@ -201,14 +199,14 @@ while True:
                 corners = corners.reshape(-1, 2)
                 corners = corners[:, np.newaxis, :]
             cv2.drawChessboardCorners(frame, chessboard_size, corners, ret_corners)
-            cameras[idx]["corners"] = corners
+            cam["corners"] = corners
         else:
-            cameras[idx]["corners"] = None
+            cam["corners"] = None
 
-        if cameras[idx]["image_size"] is None:
-            cameras[idx]["image_size"] = gray.shape[::-1]
+        if cam["image_size"] is None:
+            cam["image_size"] = gray.shape[::-1]
         else:
-            assert cameras[idx]["image_size"] == gray.shape[::-1]
+            assert cam["image_size"] == gray.shape[::-1]
 
         # Resize the frame before displaying
         frame_height, frame_width = frame.shape[:2]
@@ -217,6 +215,8 @@ while True:
         resized_frame = cv2.resize(
             frame, (new_width, new_height), interpolation=cv2.INTER_AREA
         )
+
+        # Display the resized frame
         cv2.imshow(f"Camera_{idx}", resized_frame)
 
     key = cv2.waitKey(1)
@@ -225,70 +225,31 @@ while True:
         sys.exit()
 
     elif key & 0xFF == ord("c"):
-        print("Capturing calibration images...")
-        # Collect detected corners
-        detected_cameras = []
-        corners_dict = {}
-
-        for idx in cameras:
-            corners = cameras[idx]["corners"]
-            if corners is not None:
-                corners_dict[idx] = corners
-                detected_cameras.append(idx)
-                cameras[idx]["imgpoints"].append(corners)
-                camera_image_counts[idx] += 1
-
-        if detected_cameras:
-            print(f"Pattern detected in cameras: {detected_cameras}")
-            # Update counts for camera pairs
-            for pair in itertools.combinations(detected_cameras, 2):
-                sorted_pair = tuple(sorted(pair))
-                pair_imgpoints[sorted_pair].append(
-                    (corners_dict[sorted_pair[0]], corners_dict[sorted_pair[1]])
-                )
-                pair_objpoints[sorted_pair].append(objp)
-
-            # Print for observation
-            counts = {k: len(v) for k, v in pair_imgpoints.items()}
-            print("Current counts per camera pair:")
-            for pair in counts:
-                print(f"Cameras {pair[0]} and {pair[1]}: {counts[pair]} frames")
-            # Print counts per camera
-            print("Current counts per camera:")
-            for idx in camera_indices:
-                print(f"Camera {idx}: {camera_image_counts[idx]} frames")
-        else:
-            print("Pattern not detected in any camera.")
-
-    elif key & 0xFF == ord("s"):
-        # Check if each camera has enough images
-        cameras_with_sufficient_images = [
-            idx
-            for idx in camera_indices
-            if camera_image_counts[idx] >= calibration_images_needed
+        # Verify shot
+        missing_cameras = [
+            idx for idx in camera_indices if cameras[idx]["corners"] is None
         ]
-        missing_cameras = set(camera_indices) - set(cameras_with_sufficient_images)
         if missing_cameras:
-            print("\nNot all cameras have sufficient data for intrinsic calibration.")
-            print(f"Cameras needing more images: {sorted(missing_cameras)}")
-            print("Current counts per camera:")
-            for idx in camera_indices:
-                print(f"Camera {idx}: {camera_image_counts[idx]} frames")
-            print(f"Need at least {calibration_images_needed} frames per camera.")
+            print("Not all cameras have detected the pattern.")
+            print(f"+- Cameras missing pattern: {sorted(missing_cameras)}")
             continue
 
-        # Assert that each pair of cameras has enough overlap
-        for pair, elems in pair_imgpoints.items():
-            if len(elems) < calibration_images_needed:
-                print(
-                    f"Not enough frames for camera pair {pair}. Need at least {calibration_images_needed}."
-                )
-                continue
+        # Collect detected corners
+        shots.append({idx: cameras[idx]["corners"] for idx in camera_indices})
+
+        # Print how many shots remains
+        print(f"Captured {len(shots)}/{calibration_images_needed}.")
+
+    elif key & 0xFF == ord("s"):
+        # Check if can proceed
+        if len(shots) < calibration_images_needed:
+            remaining_shots = calibration_images_needed - len(shots)
+            print(
+                f"Not enough shots collected. Please capture {remaining_shots} more shots."
+            )
+            continue
 
         print("\nProceeding to calibration...")
-        print("Number of frames collected per camera:")
-        for idx in camera_indices:
-            print(f"Camera {idx}: {camera_image_counts[idx]} frames")
         break
 
 # Release resources after loop
@@ -296,61 +257,87 @@ for idx in cameras:
     cameras[idx]["cap"].release()
 cv2.destroyAllWindows()
 
+# Prepare object points based on the real-world dimensions of the calibration pattern
+objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
+objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(-1, 2)
+objp *= square_size
+
 # Perform intrinsic calibrations
 for idx in cameras:
-    camera = cameras[idx]
-    print(f"Processing intrinsic calibration for camera {idx}...")
+    cam = cameras[idx]
     cam_conf = next(conf for conf in cameras_confs if conf["index"] == idx)
 
     if args.use_existing_intrinsics and "intrinsic" in cam_conf:
         print(f"Using existing intrinsic parameters for camera {idx}.")
         # Reconstruct camera matrix and distortion coefficients
         intrinsic_conf = cam_conf["intrinsic"]
-        fx = intrinsic_conf["focal_length_pixels"]["x"]
-        fy = intrinsic_conf["focal_length_pixels"]["y"]
+        fx = intrinsic_conf["focal_length_pixels"][0]
+        fy = intrinsic_conf["focal_length_pixels"][1]
         s = intrinsic_conf["skew_coefficient"]
-        cx = intrinsic_conf["principal_point"]["x"]
-        cy = intrinsic_conf["principal_point"]["y"]
+        cx = intrinsic_conf["principal_point"][0]
+        cy = intrinsic_conf["principal_point"][1]
         mtx = np.array([[fx, s, cx], [0, fy, cy], [0, 0, 1]])
         dist_coeffs = np.array(intrinsic_conf["dist_coeffs"])
     else:
         print(f"Performing intrinsic calibration for camera {idx}...")
         ret, mtx, dist_coeffs, _, _ = cv2.calibrateCamera(
-            [objp for _ in camera["imgpoints"]],
-            camera["imgpoints"],
-            camera["image_size"],
+            [objp for _ in range(len(shots))],
+            [shot[idx] for shot in shots],
+            cam["image_size"],
             None,
             None,
         )
         dist_coeffs = dist_coeffs.flatten()
+
         # Extract intrinsic parameters
         fx, fy = mtx[0, 0], mtx[1, 1]
         s, cx, cy = mtx[0, 1], mtx[0, 2], mtx[1, 2]
+
         # Store intrinsic parameters
         cam_conf["intrinsic"] = {
-            "focal_length_pixels": {"x": fx, "y": fy},
+            "focal_length_pixels": [fx, fy],
             "skew_coefficient": s,
-            "principal_point": {"x": cx, "y": cy},
+            "principal_point": [cx, cy],
             "dist_coeffs": dist_coeffs.tolist(),
         }
 
     # Store intrinsic parameters for later use
-    camera["mtx"] = mtx
-    camera["dist_coeffs"] = dist_coeffs
+    cam["mtx"] = mtx
+    cam["dist_coeffs"] = dist_coeffs
 
-print("\nPerforming stereo calibration for all camera pairs...")
-pair_transformations = {}
-for pair, elems in pair_imgpoints.items():
-    idx1, idx2 = pair
-    objpoints = pair_objpoints[pair]
-    imgpoints1 = [imgpair[0] for imgpair in elems]
-    imgpoints2 = [imgpair[1] for imgpair in elems]
+print("\nComputing transformations relative to the pivot camera...")
 
-    mtx1 = cameras[idx1]["mtx"]
-    dist1 = cameras[idx1]["dist_coeffs"]
+# Pivot camera extrinsic is identity
+pivot_cam_conf = next(conf for conf in cameras_confs if conf["index"] == reference_idx)
+pivot_cam_conf["extrinsic"] = {
+    "translation_mm": [0, 0, 0],
+    "rotation_rodrigues": [0, 0, 0],
+    "rotation_matrix": [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+    ],
+}
 
-    mtx2 = cameras[idx2]["mtx"]
-    dist2 = cameras[idx2]["dist_coeffs"]
+# Prepare shared data before transoformation compute
+objpoints = [objp for _ in range(len(shots))]
+
+imgpoints1 = [shot[reference_idx] for shot in shots]
+
+mtx1 = cameras[reference_idx]["mtx"]
+dist1 = cameras[reference_idx]["dist_coeffs"]
+
+image_size = cameras[reference_idx]["image_size"]
+
+# Compute transformations for each camera relative to the pivot
+for idx in camera_indices:
+    if idx == reference_idx:
+        continue
+
+    imgpoints2 = [shot[idx] for shot in shots]
+
+    mtx2 = cameras[idx]["mtx"]
+    dist2 = cameras[idx]["dist_coeffs"]
 
     # Stereo calibration
     ret, _, _, _, _, R, T, E, F = cv2.stereoCalibrate(
@@ -361,7 +348,7 @@ for pair, elems in pair_imgpoints.items():
         dist1,
         mtx2,
         dist2,
-        cameras[idx1]["image_size"],
+        image_size,
         criteria=(
             cv2.TERM_CRITERIA_MAX_ITER + cv2.TERM_CRITERIA_EPS,
             100,
@@ -370,78 +357,11 @@ for pair, elems in pair_imgpoints.items():
         flags=cv2.CALIB_FIX_INTRINSIC,
     )
 
-    pair_transformations[pair] = {"R": R, "T": T}
-    print(f"Stereo calibration between cameras {idx1} and {idx2} completed.")
-
-# Since each pair of cameras is guaranteed to have sufficient overlap,
-# we can derive extrinsics directly from the pivot camera.
-# For each camera other than the pivot, find the transformation with the pivot camera directly.
-
-print("\nComputing transformations relative to the pivot camera...")
-
-# Pivot camera extrinsic is identity
-pivot_cam_conf = next(conf for conf in cameras_confs if conf["index"] == reference_idx)
-pivot_cam_conf["extrinsic"] = {
-    "translation_centimeters": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-    },
-    "rotation_radians": {
-        "yaw": 0.0,
-        "pitch": 0.0,
-        "roll": 0.0,
-    },
-}
-
-
-# Helper function to convert rotation matrix to Euler angles (Z-Y-X Tait-Bryan)
-def rotation_matrix_to_euler(R):
-    sy = np.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2)
-    singular = sy < 1e-6
-    if not singular:
-        yaw = np.arctan2(R[2, 1], R[2, 2])
-        pitch = np.arctan2(-R[2, 0], sy)
-        roll = np.arctan2(R[1, 0], R[0, 0])
-    else:
-        yaw = np.arctan2(-R[1, 2], R[1, 1])
-        pitch = np.arctan2(-R[2, 0], sy)
-        roll = 0
-    return yaw, pitch, roll
-
-
-# Compute transformations for each camera relative to the pivot
-for idx in camera_indices:
-    if idx == reference_idx:
-        continue
-
-    # Since every pair has frames in common, we can directly use the pair (pivot, idx)
-    sorted_pair = tuple(sorted((reference_idx, idx)))
-    rel_trans = pair_transformations[sorted_pair]
-    R = rel_trans["R"]
-    T = rel_trans["T"]
-
-    # If pivot < idx, R and T describe pivot->idx directly
-    # If pivot > idx, we need to invert
-    if reference_idx > idx:
-        R = R.T
-        T = -R @ T
-
-    yaw, pitch, roll = rotation_matrix_to_euler(R)
-    T_cm = T.flatten() * 0.1  # Convert mm to cm
-
     cam_conf = next(conf for conf in cameras_confs if conf["index"] == idx)
     cam_conf["extrinsic"] = {
-        "translation_centimeters": {
-            "x": float(T_cm[0]),
-            "y": float(T_cm[1]),
-            "z": float(T_cm[2]),
-        },
-        "rotation_radians": {
-            "yaw": float(yaw),
-            "pitch": float(pitch),
-            "roll": float(roll),
-        },
+        "translation_mm": T.flatten().tolist(),
+        "rotation_rodrigues": cv2.Rodrigues(R)[0].flatten().tolist(),
+        # "rotation_matrix": R.tolist(),
     }
 
     print(f"Computed transformation from camera {reference_idx} to camera {idx}.")

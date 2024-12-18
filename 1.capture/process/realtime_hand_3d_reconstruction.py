@@ -1,3 +1,4 @@
+# from itertools import combinations
 from itertools import combinations
 import cv2
 import mediapipe as mp
@@ -21,42 +22,62 @@ def load_camera_parameters(cameras_file):
         if "intrinsic" not in cam_conf or "extrinsic" not in cam_conf:
             print(f"Camera {idx} does not have necessary calibration data.")
             continue
+
         # Intrinsic parameters
         intrinsic = cam_conf["intrinsic"]
-        mtx = np.array(
+        intrinsic_mtx = np.array(
             [
                 [
-                    intrinsic["focal_length_pixels"]["x"],
+                    intrinsic["focal_length_pixels"][0],
                     intrinsic["skew_coefficient"],
-                    intrinsic["principal_point"]["x"],
+                    intrinsic["principal_point"][1],
                 ],
                 [
                     0,
-                    intrinsic["focal_length_pixels"]["y"],
-                    intrinsic["principal_point"]["y"],
+                    intrinsic["focal_length_pixels"][1],
+                    intrinsic["principal_point"][1],
                 ],
                 [0, 0, 1],
             ]
         )
         dist_coeffs = np.array(intrinsic["dist_coeffs"])
+
         # Extrinsic parameters
         extrinsic = cam_conf["extrinsic"]
-        T_cm = extrinsic["translation_centimeters"]
-        R_rad = extrinsic["rotation_radians"]
-        # Convert rotation from Euler angles to rotation matrix
-        yaw = R_rad["yaw"]
-        pitch = R_rad["pitch"]
-        roll = R_rad["roll"]
-        R = euler_angles_to_rotation_matrix(yaw, pitch, roll)
-        T = (
-            np.array([[T_cm["x"]], [T_cm["y"]], [T_cm["z"]]]) * 10
-        )  # Convert to millimeters
+
+        T = np.array([extrinsic["translation_mm"]], dtype=np.float64)
+        if T.shape != (1, 3):
+            raise ValueError(
+                f"Invalid translation_mm shape for camera {idx}, expected 3x1."
+            )
+        T = T.swapaxes(1, 0)
+
+        # R = np.array(extrinsic["rotation_matrix"], dtype=np.float64)
+        # if R.shape != (3, 3):
+        #     raise ValueError(
+        #         f"Invalid rotation_matrix shape for camera {idx}, expected 3x3."
+        #     )
+        # rvec, _ = cv2.Rodrigues(R)
+
+        rvec = np.array([extrinsic["rotation_rodrigues"]], dtype=np.float64)
+        if rvec.shape != (1, 3):
+            raise ValueError(
+                f"Invalid rotation_rodrigues shape for camera {idx}, expected 1x3."
+            )
+        rvec = rvec.swapaxes(1, 0)
+        R, _ = cv2.Rodrigues(rvec)
+
+        # Make projection matrix
+        RT = np.hstack((R, T))  # Rotation and translation
+        P = intrinsic_mtx @ RT  # Projection matrix
+
         # Store parameters
         cameras[idx] = {
-            "mtx": mtx,
+            "intrinsic_mtx": intrinsic_mtx,
             "dist": dist_coeffs,
-            "R": R,
+            "rvec": rvec,
             "T": T,
+            "P": P,
             "cap": None,
             "frame": None,
             "hand_landmarks": None,
@@ -66,78 +87,70 @@ def load_camera_parameters(cameras_file):
     return cameras
 
 
-def euler_angles_to_rotation_matrix(yaw, pitch, roll):
-    """
-    Converts Euler angles (in radians) to a rotation matrix.
-    """
-    R_z = np.array(
-        [[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]]
+def point_pixel_coords(cam, point_idx):
+    lm = cam["hand_landmarks"][point_idx]
+
+    # Convert normalized coordinates to pixel coordinates
+    h, w, _ = cam["frame"].shape
+    x = lm.x * w
+    y = lm.y * h
+
+    return x, y
+
+
+def undistorted_point_pixel_coords(cam, point_idx):
+    x, y = point_pixel_coords(cam, point_idx)
+
+    # Undistort points
+    undistorted = cv2.undistortPoints(
+        np.array([[[x, y]]], dtype=np.float32),
+        cam["intrinsic_mtx"],
+        cam["dist"],
+        P=cam["intrinsic_mtx"],
     )
-    R_y = np.array(
-        [
-            [np.cos(pitch), 0, np.sin(pitch)],
-            [0, 1, 0],
-            [-np.sin(pitch), 0, np.cos(pitch)],
-        ]
-    )
-    R_x = np.array(
-        [[1, 0, 0], [0, np.cos(roll), -np.sin(roll)], [0, np.sin(roll), np.cos(roll)]]
-    )
-    R = R_z @ R_y @ R_x
-    return R
+
+    return undistorted[0][0]
 
 
-def triangulate_points(cameras, point_idx):
+def stereo_triangulate_point(cameras, point_idx):
     """
-    Triangulate 3D point from multiple camera views.
+    Triangulate 3D point from exactly two camera views.
+    Use this in prefer to triangulate_point if only two cameras are available for triangulation
     """
-    projections = []
-    points = []
+    assert len(cameras) == 2
+    assert all(cam["hand_landmarks"] is not None for cam in cameras)
 
-    for cam in cameras:
-        if cam["hand_landmarks"] is not None:
-            lm = cam["hand_landmarks"][point_idx]
+    # Take the first two cameras
+    cam1, cam2 = cameras[0], cameras[1]
 
-            # Convert normalized coordinates to pixel coordinates
-            h, w, _ = cam["frame"].shape
-            x = lm.x * w
-            y = lm.y * h
+    # Get undistorted pixel coordinates from both cameras
+    x1, y1 = undistorted_point_pixel_coords(cam1, point_idx)
+    x2, y2 = undistorted_point_pixel_coords(cam2, point_idx)
 
-            # Undistort points
-            undistorted = cv2.undistortPoints(
-                np.array([[[x, y]]], dtype=np.float32),
-                cam["mtx"],
-                cam["dist"],
-                P=cam["mtx"],
-            )
+    # Prepare input for cv2.triangulatePoints
+    # points must be shaped as (2, N). Here N=1 since we have one point.
+    pts1 = np.array([[x1], [y1]], dtype=np.float64)
+    pts2 = np.array([[x2], [y2]], dtype=np.float64)
 
-            points.append(undistorted[0][0])
+    # Triangulate
+    pts4D = cv2.triangulatePoints(cam1["P"], cam2["P"], pts1, pts2)
 
-            # Compute projection matrix
-            RT = np.hstack((cam["R"], cam["T"]))
-            P = cam["mtx"] @ RT
-            projections.append(P)
+    # Convert from homogeneous to Cartesian coordinates
+    X = pts4D[:3, 0] / pts4D[3, 0]
 
-    if len(projections) >= 2:
-        # Prepare matrices for triangulation
-        A = []
-        for i in range(len(projections)):
-            P = projections[i]
-            x, y = points[i]
-            A.append(x * P[2, :] - P[0, :])
-            A.append(y * P[2, :] - P[1, :])
+    return X
 
-        A = np.array(A)
 
-        # Solve using SVD
-        U, S, Vt = np.linalg.svd(A)
-        X = Vt[-1]
-        X /= X[3]
-
-        smallest_singular_value = S[-1]
-        return X[:3], smallest_singular_value
-    else:
-        return None
+def project(cam, point3d):
+    projected_point, _ = cv2.projectPoints(
+        point3d,
+        cam["rvec"],
+        cam["T"],
+        cam["intrinsic_mtx"],
+        cam["dist"],
+    )
+    projected_point = projected_point[0][0]
+    return projected_point[0], projected_point[1]
 
 
 num_landmarks = 21  # MediaPipe Hands has 21 landmarks
@@ -175,6 +188,82 @@ def main():
         print("Need at least two cameras with calibration data.")
         sys.exit(1)
 
+    def best_stereo_triangulate_point(cameras_ids, point_idx):
+        """
+        Triangulate 3D point from multiple camera views.
+        Makes all stereo projections and chooses the best
+        """
+        # Iterate all pairs of cameras to find best triangulation for each point
+        best_point = None
+        best_score = float("+inf")
+        best_cams = []
+
+        for ids in combinations(
+            filter(
+                lambda idx: cameras[idx]["hand_landmarks"] is not None,
+                cameras_ids,
+            ),
+            2,
+        ):
+            cams = list(map(cameras.get, ids))
+            point_3d = stereo_triangulate_point(cams, point_idx)
+
+            mean_reprojection_error = 0
+            for cam in cams:
+                x1, y1 = project(cam, point_3d)
+                x0, y0 = point_pixel_coords(cam, point_idx)
+
+                # Compute the error
+                reprojection_error = np.linalg.norm(
+                    np.array([x1, y1]) - np.array([x0, y0])
+                )
+
+                mean_reprojection_error += reprojection_error
+
+            mean_reprojection_error /= len(cams)
+
+            if mean_reprojection_error < best_score:
+                best_point = point_3d
+                best_score = mean_reprojection_error
+                best_cams = ids
+
+        return best_cams, best_point
+
+    def triangulate_point(cameras_ids, point_idx):
+        """
+        Triangulate 3D point from multiple camera views.
+        Alternative to best_stereo_triangulate_point using custom svg
+        """
+        cams = list(map(cameras.get, cameras_ids))
+
+        projections = []
+        points = []
+
+        for cam in cams:
+            if cam["hand_landmarks"] is not None:
+                points.append(undistorted_point_pixel_coords(cam, point_idx))
+                projections.append(cam["P"])
+
+        if len(projections) >= 2:
+            # Prepare matrices for triangulation
+            A = []
+            for i in range(len(projections)):
+                P = projections[i]
+                x, y = points[i]
+                A.append(x * P[2, :] - P[0, :])
+                A.append(y * P[2, :] - P[1, :])
+
+            A = np.array(A)
+
+            # Solve using SVD
+            U, S, Vt = np.linalg.svd(A)
+            X = Vt[-1]
+            X /= X[3]
+
+            return cameras_ids, X[:3]
+        else:
+            return [], None
+
     # Initialize video captures and MediaPipe Hands trackers
     mp_hands = mp.solutions.hands
     for idx in cameras:
@@ -183,10 +272,12 @@ def main():
         if not cap.isOpened():
             print(f"Error: Could not open camera {idx}")
             sys.exit(1)
+
         # Disable autofocus
         autofocus_supported = cap.get(cv2.CAP_PROP_AUTOFOCUS) != -1
         if autofocus_supported:
             cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+
         # Set manual focus value
         focus_value = cameras[idx]["focus"]
         focus_supported = cap.set(cv2.CAP_PROP_FOCUS, focus_value)
@@ -198,6 +289,7 @@ def main():
             sys.exit(1)
         cameras[idx]["cap"] = cap
         cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_AUTOSIZE)
+
         # Initialize MediaPipe Hands tracker for each camera
         cameras[idx]["hands_tracker"] = mp_hands.Hands(
             static_image_mode=False,
@@ -210,111 +302,66 @@ def main():
     while True:
         # Capture frames
         for idx in cameras:
-            cap = cameras[idx]["cap"]
+            cam = cameras[idx]
+
+            cap = cam["cap"]
             ret, frame = cap.read()
+
             if not ret:
                 print(f"Error: Could not read from camera {idx}")
                 continue
-            cameras[idx]["frame"] = frame
+
+            cam["frame"] = frame
 
         # Process frames with MediaPipe
-        for idx in cameras:
-            frame = cameras[idx]["frame"]
+        for cam in cameras.values():
+            frame = cam["frame"]
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            hands = cameras[idx]["hands_tracker"]
+
+            hands = cam["hands_tracker"]
             results = hands.process(rgb_frame)
-            cameras[idx]["hand_landmarks"] = None
+
+            cam["hand_landmarks"] = None
+
             if results.multi_hand_landmarks:
                 for hand_landmarks, handedness in zip(
                     results.multi_hand_landmarks, results.multi_handedness
                 ):
-                    if handedness.classification[0].label == "Right":
-                        cameras[idx]["hand_landmarks"] = hand_landmarks.landmark
-                        break  # Only consider one right hand
+                    if (
+                        handedness.classification[0].label == "Right"
+                    ):  # actually left lol
+                        cam["hand_landmarks"] = hand_landmarks.landmark
+                        break
 
-        # Iterate all pairs of cameras to find best triangulation for each point
+        # Triangulate points
         chosen_cameras = []
         points_3d = []
-        for point_idx in range(num_landmarks):
-            best_point = None
-            best_score = float("+inf")
-            best_cams = None
+        cams_with_landmarks_ids = [
+            idx for idx in cameras if cameras[idx]["hand_landmarks"] is not None
+        ]
+        if len(cams_with_landmarks_ids) >= 2:
+            for point_idx in range(num_landmarks):
+                chosen, point_3d = triangulate_point(cams_with_landmarks_ids, point_idx)
+                assert point_3d is not None
 
-            for ids in combinations(
-                filter(
-                    lambda idx: cameras[idx]["hand_landmarks"] is not None,
-                    cameras.keys(),
-                ),
-                2,
-            ):
-                cams = list(map(cameras.get, ids))
-                v = triangulate_points(cams, point_idx)
-                assert v is not None
-                point_3d, score = v
-
-                mean_reprojection_error = 0
-                for cam in cams:
-                    # Camera matrix and extrinsics
-                    RT = np.hstack((cam["R"], cam["T"]))  # Rotation and translation
-                    P = cam["mtx"] @ RT  # Projection matrix
-
-                    # Reproject the 3D point to 2D
-                    point_3d_homogeneous = np.append(point_3d, 1)  # Make homogeneous
-                    reprojected = P @ point_3d_homogeneous
-                    reprojected /= reprojected[2]  # Normalize
-
-                    # Extract 2D coordinates
-                    x1, y1 = int(reprojected[0]), int(reprojected[1])
-
-                    lm = cam["hand_landmarks"][point_idx]
-                    h, w, _ = cam["frame"].shape
-                    x0 = lm.x * w
-                    y0 = lm.y * h
-
-                    # Compute the error
-                    reprojection_error = np.linalg.norm(
-                        np.array([x1, y1]) - np.array([x0, y0])
-                    )
-
-                    mean_reprojection_error += reprojection_error
-
-                mean_reprojection_error /= len(cams)
-
-                if mean_reprojection_error < best_score:
-                    best_point = point_3d
-                    best_score = score
-                    best_cams = ids
-
-            if best_point is None:
-                break
-
-            chosen_cameras.append(best_cams)
-            points_3d.append(best_point)
+                chosen_cameras.append(chosen)
+                points_3d.append(point_3d)
 
         # Draw landmarks and display frames
         for idx in cameras:
-            frame = cameras[idx]["frame"]
+            cam = cameras[idx]
+            frame = cam["frame"]
 
             # Draw landmarks if can
             if len(points_3d) == 21:
-                # Camera matrix and extrinsics
-                cam = cameras[idx]
-                RT = np.hstack((cam["R"], cam["T"]))  # Rotation and translation
-                P = cam["mtx"] @ RT  # Projection matrix
-
                 # Store reprojected 2D landmarks for drawing connections
                 reprojected_points = {}
 
                 for point_idx, point_3d in enumerate(points_3d):
-                    # Reproject the 3D point to 2D
-                    point_3d_homogeneous = np.append(point_3d, 1)  # Make homogeneous
-                    reprojected = P @ point_3d_homogeneous
-                    reprojected /= reprojected[2]  # Normalize
-
-                    # Extract 2D coordinates
-                    x, y = int(reprojected[0]), int(reprojected[1])
-
-                    # Store reprojected 2D point for connections
+                    x, y = project(cam, point_3d)
+                    x, y = max(min(int(x), cam["frame"].shape[1]), 0), max(
+                        min(int(y), cam["frame"].shape[0]), 0
+                    )
                     reprojected_points[point_idx] = (x, y)
 
                 # Draw connections between landmarks first
@@ -376,9 +423,9 @@ def main():
             break
 
     # Release resources
-    for idx in cameras:
-        cameras[idx]["cap"].release()
-        cameras[idx]["hands_tracker"].close()
+    for cam in cameras.values():
+        cam["cap"].release()
+        cam["hands_tracker"].close()
     cv2.destroyAllWindows()
 
 
