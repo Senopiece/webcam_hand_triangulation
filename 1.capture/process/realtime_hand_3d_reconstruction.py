@@ -159,8 +159,15 @@ def main():
         default=0.7,
         help="Scale of a window",
     )
+    parser.add_argument(
+        "-r",
+        "--render",
+        help="Forward captured 3d points to render in the 3d view",
+        action="store_true",
+    )
     args = parser.parse_args()
     cameras_path = args.file
+    do_render = args.render
 
     # Load camera parameters
     cameras = load_camera_parameters(cameras_path)
@@ -353,15 +360,16 @@ def main():
             cv2.imshow(f"Camera_{idx}", resized_frame)
 
         # Visualize landmarks
-        if len(points_3d) == 21:
-            points_3d = np.array(points_3d)
-            bones = points_3d_to_bones_rotations(points_3d)
-            resp = requests.post("http://localhost:3000/api/bones", json=bones)
-            if resp.status_code != 200:
-                print(f"Failed to send data. Status code: {resp.status_code}")
-                print(resp.text)
-        else:
-            print("Not enough data to reconstruct hand in 3D.")
+        if do_render:
+            if len(points_3d) == 21:
+                points_3d = np.array(points_3d)
+                bones = points_3d_to_bones_rotations(points_3d)
+                resp = requests.post("http://localhost:3000/api/bones", json=bones)
+                if resp.status_code != 200:
+                    print(f"Failed to send data. Status code: {resp.status_code}")
+                    print(resp.text)
+            else:
+                print("Not enough data to reconstruct hand in 3D.")
 
         key = cv2.waitKey(1)
         if key & 0xFF == ord("q"):
