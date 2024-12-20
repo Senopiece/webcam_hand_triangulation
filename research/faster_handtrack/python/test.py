@@ -61,15 +61,12 @@ async def process_video(
     async def feeding_loop():
         while cap.isOpened():
             ret, frame = cap.read()
-            ts = cap.get(cv2.CAP_PROP_POS_MSEC)
 
             if not ret:
                 print("Error reading frames.")
                 break
 
-            await asyncio.gather(
-                *[processor.send(ts, frame) for processor in processors]
-            )
+            await asyncio.gather(*[processor.send(frame) for processor in processors])
 
     # Run loops: consume asyncronusly and join with feeding
     consuming_task = asyncio.create_task(consuming_loop())
