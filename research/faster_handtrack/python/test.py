@@ -36,32 +36,37 @@ async def process_video(
 
     fps = FPSCounter()
 
-    def processed(cam, ts, res, frame):
-        if cam == 0:
-            fps.count()
-
     processors = [
-        HandTrackersPool(
-            [impl_selector[impl]() for _ in range(division)],
-            lambda ts, res, frame, i=i: processed(i, ts, res, frame),
-        )
-        for i in range(channels)
+        HandTrackersPool([impl_selector[impl]() for _ in range(division)])
+        for _ in range(channels)
     ]
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        ts = cap.get(cv2.CAP_PROP_POS_MSEC)
+    async def consuming_loop():
+        while True:
+            await asyncio.gather(*[processor.results.get() for processor in processors])
+            fps.count()
 
-        if not ret:
-            print("Error reading frames.")
-            break
+    async def feeding_loop():
+        while cap.isOpened():
+            ret, frame = cap.read()
+            ts = cap.get(cv2.CAP_PROP_POS_MSEC)
 
-        await asyncio.gather(*[processor.send(ts, frame) for processor in processors])
+            if not ret:
+                print("Error reading frames.")
+                break
+
+            await asyncio.gather(
+                *[processor.send(ts, frame) for processor in processors]
+            )
+
+    consuming_task = asyncio.create_task(consuming_loop())
+    await feeding_loop()
+
+    consuming_task.cancel()
 
     fps.mean()
 
     await asyncio.gather(*[processor.dispose() for processor in processors])
-
     cap.release()
 
 

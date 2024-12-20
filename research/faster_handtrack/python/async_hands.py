@@ -237,16 +237,14 @@ class AsyncHandsThreadedImage(_ThreadedAsyncHands):
 
 
 class HandTrackersPool:
-    def __init__(self, pool: List[AsyncHands], callback):
-        # NOTE: callback has no guarantee of order, hence use ts parameter to sort
-
+    def __init__(self, pool: List[AsyncHands]):
         self.pool = pool
-        self.callback = callback
-        self.worker_queue = asyncio.Queue()
+        self.results = asyncio.Queue()
+        self.idle_workers = asyncio.Queue()
 
         # Add all workers to the queue initially
         for worker in self.pool:
-            self.worker_queue.put_nowait(worker)
+            self.idle_workers.put_nowait(worker)
 
     async def dispose(self):
         await asyncio.gather(*[worker.dispose() for worker in self.pool])
@@ -255,15 +253,15 @@ class HandTrackersPool:
         try:
             res = await worker.send(frame)
         finally:
-            self.worker_queue.put_nowait(worker)
-            self.callback(ts, res, frame)
+            self.idle_workers.put_nowait(worker)
+            self.results.put_nowait((ts, res, frame))
 
     async def send(self, ts, frame):
         """
         Waits for an available worker and sends the frame to it.
-        NOTE: will return immediately if a worker is available, get the result from the callback
-              otherwise will block for the fist available worker, still get the result from the callback
+        NOTE: will return immediately if a worker is available, get the result from the results queue
+              otherwise will block for the fist available worker, still get the result from the results queue
         """
         # Wait for a free worker from the queue
-        worker = await self.worker_queue.get()
+        worker = await self.idle_workers.get()
         asyncio.create_task(self._send(worker, ts, frame))
