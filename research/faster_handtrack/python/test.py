@@ -93,7 +93,7 @@ async def main():
         "--channels", type=int, default=4, help="Number of channels to process."
     )
     parser.add_argument(
-        "--division", type=int, default=2, help="Size of pool of workers per channel."
+        "--division", type=int, default=4, help="Size of pool of workers per channel."
     )
     parser.add_argument(
         "--impl",
