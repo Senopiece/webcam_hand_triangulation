@@ -28,21 +28,33 @@ async def process_video(
     impl: str = "AsyncHandsThreadedBuildinSolution",
     video_path: str = "test.mkv",
 ):
+    # Initialize
     cap = cv2.VideoCapture(video_path)
 
     if not cap.isOpened():
         print("Error: Couldn't open the video file.")
         return
 
-    fps = FPSCounter()
-
     processors = [
         HandTrackersPool([impl_selector[impl]() for _ in range(division)])
         for _ in range(channels)
     ]
 
+    fps = FPSCounter()
+
+    run = True
+
     async def consuming_loop():
-        while True:
+        while (
+            run
+            or any(
+                not processor.idle_workers.full() for processor in processors
+            )  # any channel is in processing -> new results may arrive
+            or any(
+                not processor.results.empty() for processor in processors
+            )  # any channel has non empty results -> need to process them
+        ):
+            # NOTE: it will hang freeing if channels got not equal amounts of .send calls
             await asyncio.gather(*[processor.results.get() for processor in processors])
             fps.count()
 
@@ -59,13 +71,18 @@ async def process_video(
                 *[processor.send(ts, frame) for processor in processors]
             )
 
+    # Run loops: consume asyncronusly and join with feeding
     consuming_task = asyncio.create_task(consuming_loop())
     await feeding_loop()
 
-    consuming_task.cancel()
+    # Finalize
+    run = False  # notify consuming to stop
+    await consuming_task  # wait for it to finish
 
+    # Print metrics
     fps.mean()
 
+    # Release resources
     await asyncio.gather(*[processor.dispose() for processor in processors])
     cap.release()
 

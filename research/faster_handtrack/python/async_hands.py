@@ -240,7 +240,7 @@ class HandTrackersPool:
     def __init__(self, pool: List[AsyncHands]):
         self.pool = pool
         self.results = asyncio.Queue()
-        self.idle_workers = asyncio.Queue()
+        self.idle_workers = asyncio.Queue(len(pool))
 
         # Add all workers to the queue initially
         for worker in self.pool:
