@@ -1,4 +1,4 @@
-# from itertools import combinations
+import asyncio
 from itertools import combinations
 import cv2
 import mediapipe as mp
@@ -11,6 +11,9 @@ import time
 import requests
 
 from kinematics import points_3d_to_bones_rotations
+from async_hands import AsyncHandsThreadedBuildinSolution, HandTrackersPool
+
+mp_hands = mp.solutions.hands
 
 
 def load_camera_parameters(cameras_file):
@@ -82,7 +85,7 @@ def load_camera_parameters(cameras_file):
             "cap": None,
             "frame": None,
             "hand_landmarks": None,
-            "hands_tracker": None,  # To be initialized later
+            "tracker": None,  # To be initialized later
             "focus": cam_conf.get("focus", 0),  # Retrieve focus value
         }
     return cameras
@@ -157,7 +160,7 @@ def project(cam, point3d):
 num_landmarks = 21  # MediaPipe Hands has 21 landmarks
 
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(
         description="3D Hand Reconstruction using MediaPipe and Multiple Cameras"
     )
@@ -179,19 +182,22 @@ def main():
         help="Forward captured 3d points to render in the 3d view",
         action="store_true",
     )
+    parser.add_argument(
+        "--division",
+        type=int,
+        default=4,
+        help="Number of the hand tracking workers pool per camera",
+    )
     args = parser.parse_args()
     cameras_path = args.file
     do_render = args.render
+    division = args.division
 
     # Load camera parameters
     cameras = load_camera_parameters(cameras_path)
     if len(cameras) < 2:
         print("Need at least two cameras with calibration data.")
         sys.exit(1)
-
-    # Initialize FPS tracking variables
-    fps_counter = 0
-    fps_display_time = time.time()
 
     def best_stereo_triangulate_point(cameras_ids, point_idx):
         """
@@ -269,9 +275,8 @@ def main():
         else:
             return [], None
 
-    # Initialize video captures and MediaPipe Hands trackers
-    mp_hands = mp.solutions.hands
-    for idx in cameras:
+    # Initialize
+    for idx, cam in cameras.items():
         # Initialize video capture
         cap = cv2.VideoCapture(idx)
         if not cap.isOpened():
@@ -284,7 +289,7 @@ def main():
             cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
 
         # Set manual focus value
-        focus_value = cameras[idx]["focus"]
+        focus_value = cam["focus"]
         focus_supported = cap.set(cv2.CAP_PROP_FOCUS, focus_value)
         if not focus_supported:
             print(
@@ -292,169 +297,194 @@ def main():
                 file=sys.stderr,
             )
             sys.exit(1)
-        cameras[idx]["cap"] = cap
+        cam["cap"] = cap
         cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_AUTOSIZE)
 
-        # Initialize MediaPipe Hands tracker for each camera
-        cameras[idx]["hands_tracker"] = mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=1,
-            min_detection_confidence=0.9,
-            min_tracking_confidence=0.9,
+        # Initialize hands trackers for each camera
+        cameras[idx]["tracker"] = HandTrackersPool(
+            [AsyncHandsThreadedBuildinSolution() for _ in range(division)],
         )
 
-    # Start capturing frames
-    while True:
-        # Capture frames
-        for idx in cameras:
-            cam = cameras[idx]
+    run = True
 
-            cap = cam["cap"]
-            ret, frame = cap.read()
+    async def consuming_loop():
+        # FPS tracking variables
+        fps_counter = 0
+        fps = 0
+        fps_display_time = time.time()
 
-            if not ret:
-                print(f"Error: Could not read from camera {idx}")
-                continue
+        # Loop untill said to stop but make sure to process what remains
+        while (
+            run
+            or any(
+                not cam["tracker"].idle_workers.full() for cam in cameras.values()
+            )  # any channel is in processing -> new results may arrive
+            or any(
+                not cam["tracker"].results.empty() for cam in cameras.values()
+            )  # any channel has non empty results -> need to process them
+        ):
+            # NOTE: it will hang freeing if channels got not equal amounts of .send calls
+            results = await asyncio.gather(
+                *[cam["tracker"].results.get() for cam in cameras.values()]
+            )
 
-            cam["frame"] = frame
+            # Extract landmarks
+            for cam, (res, frame) in zip(cameras.values(), results):
+                cam["frame"] = frame
+                cam["hand_landmarks"] = None
 
-        # Process frames with MediaPipe
-        for cam in cameras.values():
-            frame = cam["frame"]
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-            hands = cam["hands_tracker"]
-            results = hands.process(rgb_frame)
-
-            cam["hand_landmarks"] = None
-
-            if results.multi_hand_landmarks:
-                for hand_landmarks, handedness in zip(
-                    results.multi_hand_landmarks, results.multi_handedness
-                ):
-                    if (
-                        handedness.classification[0].label == "Right"
-                    ):  # actually left lol
-                        cam["hand_landmarks"] = hand_landmarks.landmark
-                        break
-
-        # Triangulate points
-        chosen_cameras = []
-        points_3d = []
-        cams_with_landmarks_ids = [
-            idx for idx in cameras if cameras[idx]["hand_landmarks"] is not None
-        ]
-        if len(cams_with_landmarks_ids) >= 2:
-            for point_idx in range(num_landmarks):
-                chosen, point_3d = triangulate_point(cams_with_landmarks_ids, point_idx)
-                assert point_3d is not None
-
-                chosen_cameras.append(chosen)
-                points_3d.append(point_3d)
-
-        # Draw landmarks
-        for cam in cameras.values():
-            frame = cam["frame"]
-
-            # Draw landmarks if can
-            if len(points_3d) == 21:
-                # Store reprojected 2D landmarks for drawing connections
-                reprojected_points = {}
-
-                for point_idx, point_3d in enumerate(points_3d):
-                    x, y = project(cam, point_3d)
-                    x, y = max(min(int(x), frame.shape[1]), 0), max(
-                        min(int(y), frame.shape[0]), 0
-                    )
-                    reprojected_points[point_idx] = (x, y)
-
-                # Draw connections between landmarks first
-                for connection in mp_hands.HAND_CONNECTIONS:
-                    start_idx, end_idx = connection
-                    if (
-                        start_idx in reprojected_points
-                        and end_idx in reprojected_points
+                if res.multi_hand_landmarks:
+                    for hand_landmarks, handedness in zip(
+                        res.multi_hand_landmarks, res.multi_handedness
                     ):
-                        start_point = reprojected_points[start_idx]
-                        end_point = reprojected_points[end_idx]
-                        cv2.line(
-                            frame,
-                            start_point,
-                            end_point,
-                            color=(255, 255, 255),
-                            thickness=2,
+                        if (
+                            handedness.classification[0].label == "Right"
+                        ):  # actually left lol
+                            cam["hand_landmarks"] = hand_landmarks.landmark
+                            break
+
+            # Triangulate points
+            chosen_cameras = []
+            points_3d = []
+            cams_with_landmarks_ids = [
+                idx for idx, cam in cameras.items() if cam["hand_landmarks"] is not None
+            ]
+            if len(cams_with_landmarks_ids) >= 2:
+                for point_idx in range(num_landmarks):
+                    chosen, point_3d = triangulate_point(
+                        cams_with_landmarks_ids, point_idx
+                    )
+                    assert point_3d is not None
+
+                    chosen_cameras.append(chosen)
+                    points_3d.append(point_3d)
+
+            # Draw landmarks
+            for idx, cam in cameras.items():
+                frame = cam["frame"]
+
+                # Draw landmarks if can
+                if len(points_3d) == 21:
+                    # Store reprojected 2D landmarks for drawing connections
+                    reprojected_points = {}
+
+                    for point_idx, point_3d in enumerate(points_3d):
+                        x, y = project(cam, point_3d)
+                        x, y = max(min(int(x), frame.shape[1]), 0), max(
+                            min(int(y), frame.shape[0]), 0
                         )
+                        reprojected_points[point_idx] = (x, y)
 
-                # Draw landmarks (circles) on top of connections
-                for point_idx, point_3d in enumerate(points_3d):
-                    # Reproject the 3D point to 2D (reuse previously computed values)
-                    x, y = reprojected_points[point_idx]
+                    # Draw connections between landmarks first
+                    for connection in mp_hands.HAND_CONNECTIONS:
+                        start_idx, end_idx = connection
+                        if (
+                            start_idx in reprojected_points
+                            and end_idx in reprojected_points
+                        ):
+                            start_point = reprojected_points[start_idx]
+                            end_point = reprojected_points[end_idx]
+                            cv2.line(
+                                frame,
+                                start_point,
+                                end_point,
+                                color=(255, 255, 255),
+                                thickness=2,
+                            )
 
-                    # Check if this camera was chosen for this point
-                    if idx in chosen_cameras[point_idx]:
-                        color = (0, 255, 0)  # Green for chosen cameras
-                    else:
-                        color = (255, 0, 0)  # Blue for other cameras
+                    # Draw landmarks (circles) on top of connections
+                    for point_idx, point_3d in enumerate(points_3d):
+                        # Reproject the 3D point to 2D (reuse previously computed values)
+                        x, y = reprojected_points[point_idx]
 
-                    # Draw the landmark
-                    cv2.circle(frame, (x, y), radius=5, color=color, thickness=-1)
+                        # Check if this camera was chosen for this point
+                        if idx in chosen_cameras[point_idx]:
+                            color = (0, 255, 0)  # Green for chosen cameras
+                        else:
+                            color = (255, 0, 0)  # Blue for other cameras
 
-        # FPS counter update every second
-        fps_counter += 1
-        current_time = time.time()
-        if current_time - fps_display_time >= 1.0:
-            fps_display_time = current_time
-            fps = fps_counter
-            fps_counter = 0
+                        # Draw the landmark
+                        cv2.circle(frame, (x, y), radius=5, color=color, thickness=-1)
 
-        # Display frames
-        for idx in cameras:
-            frame = cameras[idx]["frame"]
+            # FPS counter update every second
+            fps_counter += 1
+            current_time = time.time()
+            if current_time - fps_display_time >= 1.0:
+                fps_display_time = current_time
+                fps = fps_counter
+                fps_counter = 0
 
-            # Resize the frame before displaying
-            frame_height, frame_width = frame.shape[:2]
-            new_width = int(frame_width * args.window_scale)
-            new_height = int(frame_height * args.window_scale)
-            resized_frame = cv2.resize(
-                frame, (new_width, new_height), interpolation=cv2.INTER_AREA
-            )
+            # Display frames
+            for idx, cam in cameras.items():
+                frame = cam["frame"]
 
-            # Add FPS to the frame
-            cv2.putText(
-                resized_frame,
-                f"FPS: {fps}",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 0),
-                1,
-            )
+                # Resize the frame before displaying
+                frame_height, frame_width = frame.shape[:2]
+                new_width = int(frame_width * args.window_scale)
+                new_height = int(frame_height * args.window_scale)
+                resized_frame = cv2.resize(
+                    frame, (new_width, new_height), interpolation=cv2.INTER_AREA
+                )
 
-            # Display the resized frame
-            cv2.imshow(f"Camera_{idx}", resized_frame)
+                # Add FPS to the frame
+                cv2.putText(
+                    resized_frame,
+                    f"FPS: {fps}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    1,
+                )
 
-        # Visualize 3d landmarks
-        if do_render:
-            if len(points_3d) == 21:
-                points_3d = np.array(points_3d)
-                bones = points_3d_to_bones_rotations(points_3d)
-                resp = requests.post("http://localhost:3000/api/bones", json=bones)
-                if resp.status_code != 200:
-                    print(f"Failed to send data. Status code: {resp.status_code}")
-                    print(resp.text)
-            else:
-                print("Not enough data to reconstruct hand in 3D.")
+                # Display the resized frame
+                cv2.imshow(f"Camera_{idx}", resized_frame)
 
-        key = cv2.waitKey(1)
-        if key & 0xFF == ord("q"):
-            break
+            # Visualize 3d landmarks
+            if do_render:
+                if len(points_3d) == 21:
+                    points_3d = np.array(points_3d)
+                    bones = points_3d_to_bones_rotations(points_3d)
+                    resp = requests.post("http://localhost:3000/api/bones", json=bones)
+                    if resp.status_code != 200:
+                        print(f"Failed to send data. Status code: {resp.status_code}")
+                        print(resp.text)
+                else:
+                    print("Not enough data to reconstruct hand in 3D.")
+
+    async def feeding_loop():
+        while True:
+            tasks = [None for _ in range(len(cameras))]
+            for i, (idx, cam) in enumerate(cameras.items()):
+                cap = cam["cap"]
+                ret, frame = cap.read()
+
+                if not ret:
+                    print(f"Error: Could not read from camera {idx}")
+                    continue
+
+                tasks[i] = cam["tracker"].send(frame)
+
+            await asyncio.gather(*tasks)
+
+            key = cv2.waitKey(1)
+            if key & 0xFF == ord("q"):
+                break
+
+    # Run loops: consume asyncronusly and join with feeding
+    consuming_task = asyncio.create_task(consuming_loop())
+    await feeding_loop()
+
+    # Finalize
+    run = False  # notify consuming to stop
+    await consuming_task  # wait for it to finish
 
     # Release resources
     for cam in cameras.values():
         cam["cap"].release()
-        cam["hands_tracker"].close()
+    await asyncio.gather(*[cam["tracker"].dispose() for cam in cameras.values()])
     cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
