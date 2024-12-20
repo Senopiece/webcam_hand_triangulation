@@ -461,7 +461,7 @@ async def main():
 
                 if not ret:
                     print(f"Error: Could not read from camera {idx}")
-                    continue
+                    sys.exit(1)
 
                 tasks[i] = cam["tracker"].send(frame)
 
