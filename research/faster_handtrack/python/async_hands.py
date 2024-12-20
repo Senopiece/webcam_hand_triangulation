@@ -255,7 +255,7 @@ class HandTrackersPool:
         try:
             res = await worker.send(frame)
         finally:
-            await self.worker_queue.put(worker)
+            self.worker_queue.put_nowait(worker)
             self.callback(ts, res, frame)
 
     async def send(self, ts, frame):
