@@ -24,7 +24,7 @@ impl_selector = {
 
 async def process_video(
     channels=4,
-    division=2,
+    division=4,
     impl: str = "AsyncHandsThreadedBuildinSolution",
     video_path: str = "test.mkv",
 ):
