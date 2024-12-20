@@ -1,5 +1,7 @@
 >> Results on my machine
 
+# TODO: reestimate with new pool approach
+
 [Windows, channels: 4, division: 2]
 LiveStreamAsyncHands: 49 fps
 AsyncHandsThreadedVideo: 49 fps

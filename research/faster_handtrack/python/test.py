@@ -2,6 +2,7 @@ import argparse
 import cv2
 import asyncio
 from async_hands import (
+    HandTrackersPool,
     LiveStreamAsyncHands,
     AsyncHandsThreadedVideo,
     AsyncHandsThreadedImage,
@@ -35,33 +36,31 @@ async def process_video(
 
     fps = FPSCounter()
 
+    def processed(cam, ts, res, frame):
+        if cam == 0:
+            fps.count()
+
     processors = [
-        [impl_selector[impl]() for _ in range(division)] for _ in range(channels)
+        HandTrackersPool(
+            [impl_selector[impl]() for _ in range(division)],
+            lambda ts, res, frame, i=i: processed(i, ts, res, frame),
+        )
+        for i in range(channels)
     ]
 
     while cap.isOpened():
-        reads = [cap.read() for _ in range(division)]
+        ret, frame = cap.read()
+        ts = cap.get(cv2.CAP_PROP_POS_MSEC)
 
-        if any(not ret for ret, _ in reads):
+        if not ret:
             print("Error reading frames.")
             break
 
-        await asyncio.gather(
-            *[
-                asyncio.gather(
-                    *[hands.send(reads[i][1]) for i, hands in enumerate(processor)]
-                )
-                for processor in processors
-            ]
-        )
-
-        fps.count(division)
+        await asyncio.gather(*[processor.send(ts, frame) for processor in processors])
 
     fps.mean()
 
-    for processor in processors:
-        for hands in processor:
-            await hands.dispose()
+    await asyncio.gather(*[processor.dispose() for processor in processors])
 
     cap.release()
 
@@ -75,14 +74,14 @@ async def main():
         "--channels", type=int, default=4, help="Number of channels to process."
     )
     parser.add_argument(
-        "--division", type=int, default=2, help="Number of divisions per channel."
+        "--division", type=int, default=2, help="Size of pool of workers per channel."
     )
     parser.add_argument(
         "--impl",
         type=str,
         default="AsyncHandsThreadedBuildinSolution",
         choices=list(impl_selector.keys()),
-        help="implementation to use for processing.",
+        help="Implementation to use for processing.",
     )
 
     args = parser.parse_args()

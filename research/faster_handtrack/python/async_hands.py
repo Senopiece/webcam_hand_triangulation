@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import asyncio
 import threading
+from typing import List
 import cv2
 import mediapipe as mp
 from mediapipe.tasks.python import vision
@@ -22,6 +23,14 @@ class AsyncHands(ABC):
 
     @abstractmethod
     async def send(self, frame):
+        pass
+
+    @abstractmethod
+    def is_busy(self):
+        pass
+
+    @abstractmethod
+    async def wait_free(self):
         pass
 
 
@@ -62,6 +71,12 @@ class LiveStreamAsyncHands(AsyncHands):
         self.detector = None
         await self.out_data_event.wait()
 
+    def is_busy(self):
+        return not self.out_data_event.is_set()
+
+    async def wait_free(self):
+        await self.out_data_event.wait()
+
     def _result_callback(self, landmarks, img, ts):
         self.landmarks = landmarks
         self.loop.call_soon_threadsafe(self.out_data_event.set)
@@ -100,11 +115,15 @@ class _ThreadedAsyncHands(AsyncHands):
         self.worker_thread.start()
 
     async def dispose(self):
+        await self.out_data_event.wait()
         self.disposed = True
         self.in_data_event.set()
+
+    def is_busy(self):
+        return not self.out_data_event.is_set()
+
+    async def wait_free(self):
         await self.out_data_event.wait()
-        self.worker_thread.join()
-        self.in_data_event = None
 
     def _worker(self):
         while True:
@@ -215,3 +234,36 @@ class AsyncHandsThreadedImage(_ThreadedAsyncHands):
             return detector.detect(image)
 
         super().__init__(send, detector.close)
+
+
+class HandTrackersPool:
+    def __init__(self, pool: List[AsyncHands], callback):
+        # NOTE: callback has no guarantee of order, hence use ts parameter to sort
+
+        self.pool = pool
+        self.callback = callback
+        self.worker_queue = asyncio.Queue()
+
+        # Add all workers to the queue initially
+        for worker in self.pool:
+            self.worker_queue.put_nowait(worker)
+
+    async def dispose(self):
+        await asyncio.gather(*[worker.dispose() for worker in self.pool])
+
+    async def _send(self, worker: AsyncHands, ts, frame):
+        try:
+            res = await worker.send(frame)
+        finally:
+            await self.worker_queue.put(worker)
+            self.callback(ts, res, frame)
+
+    async def send(self, ts, frame):
+        """
+        Waits for an available worker and sends the frame to it.
+        NOTE: will return immediately if a worker is available, get the result from the callback
+              otherwise will block for the fist available worker, still get the result from the callback
+        """
+        # Wait for a free worker from the queue
+        worker = await self.worker_queue.get()
+        asyncio.create_task(self._send(worker, ts, frame))
