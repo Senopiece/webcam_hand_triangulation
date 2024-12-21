@@ -23,6 +23,5 @@ class FPSCounter:
 
     def mean(self):
         print(
-            f"Mean {self.label}FPS:",
-            self.total_frame_count / (time.time() - self.very_start_time),
+            f"Mean {self.label}FPS: {self.total_frame_count / (time.time() - self.very_start_time):.2f}"
         )
