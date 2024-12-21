@@ -1,0 +1,24 @@
+[CPU, channels: 4, division: 1]
+LiveStreamAsyncHands: 44.01 fps
+AsyncHandsThreadedVideo: 45.05 fps
+AsyncHandsThreadedImage: 45.02 fps
+AsyncHandsThreadedBuildinSolution: 50.10 fps
+
+[CPU, channels: 4, division: 2]
+LiveStreamAsyncHands: 65.32 fps
+AsyncHandsThreadedVideo: 65.35 fps
+AsyncHandsThreadedImage: 64.94 fps
+AsyncHandsThreadedBuildinSolution: 72.65 fps
+
+[CPU, channels: 4, division: 3]
+LiveStreamAsyncHands: 71.06 fps
+AsyncHandsThreadedVideo: 70.44 fps
+AsyncHandsThreadedImage: 68.78 fps
+AsyncHandsThreadedBuildinSolution: 82.72 fps
+
+[CPU, channels: 4, division: 4]
+LiveStreamAsyncHands: 69.34 fps
+AsyncHandsThreadedVideo: 62.81 fps
+AsyncHandsThreadedImage: 64.08 fps
+AsyncHandsThreadedBuildinSolution: 85.19 fps
+

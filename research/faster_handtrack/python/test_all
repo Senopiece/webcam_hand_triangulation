@@ -1,0 +1,127 @@
+#!/bin/bash
+
+# TODO: cuda and bare linux tests
+
+set -e
+
+# Change the current working directory to the directory the script is located
+dir="$(dirname "$0")"
+cd "$dir"
+
+# Determine the platform and set the result file name
+if grep -qEi "Microsoft|WSL" /proc/version &>/dev/null; then
+    platform="WSL"
+    result_file="wsl_results.txt"
+else
+    platform="Windows"
+    result_file="windows_results.txt"
+fi
+
+# Output platform detection to stdout
+echo "Platform detected: $platform"
+
+# Ask user whether to proceed unless --force flag is set
+if [[ "$*" != *--force* ]]; then
+    read -p "Proceed with tests? (y/n): " choice
+    case "$choice" in
+        y|Y ) echo "Proceeding with tests..." ;;
+        n|N ) echo "Tests aborted by user."; exit 0 ;;
+        * ) echo "Invalid choice. Tests aborted."; exit 1 ;;
+    esac
+fi
+
+declare -a cpu_implementations=(
+    "LiveStreamAsyncHands"
+    "AsyncHandsThreadedVideo"
+    "AsyncHandsThreadedImage"
+    "AsyncHandsThreadedBuildinSolution"
+)
+
+declare -a gpu_implementations=(
+    "LiveStreamAsyncHands(GPU)"
+    "AsyncHandsThreadedVideo(GPU)"
+    "AsyncHandsThreadedImage(GPU)"
+)
+
+declare -a channels=(4)
+declare -a divisions=(1 2 3 4)
+
+if [ "$platform" = "WSL" ]; then
+    total_tasks=$(( ${#channels[@]} * ${#divisions[@]} * ${#cpu_implementations[@]} + ${#channels[@]} * ${#divisions[@]} * ${#gpu_implementations[@]} * 2 ))
+else
+    total_tasks=$(( ${#channels[@]} * ${#divisions[@]} * ${#cpu_implementations[@]} ))
+fi
+
+current_task=0
+
+> "$result_file"  # Clear the result file
+
+# Test CPU implementations
+for channel in "${channels[@]}"; do
+    for division in "${divisions[@]}"; do
+        echo "[CPU, channels: $channel, division: $division]" >> "$result_file"
+
+        for impl in "${cpu_implementations[@]}"; do
+            current_task=$((current_task + 1))
+            echo ">>> $current_task/$total_tasks Processing $impl[CPU, channels: $channel, division: $division]"  # Output to stdout
+            
+            fps=$(python test.py --impl "$impl" --channels "$channel" --division "$division" | grep Mean | awk '{print $NF}')
+            
+            if [ -z "$fps" ]; then
+                echo "$impl: failed" >> "$result_file"
+                continue
+            fi
+            echo "$impl: $fps fps" >> "$result_file"
+        done
+
+        echo "" >> "$result_file"
+    done
+done
+
+if [ "$platform" = "WSL" ]; then
+    # Test GPU implementations with Radeon
+    export MESA_D3D12_DEFAULT_ADAPTER_NAME=Radeon
+    for channel in "${channels[@]}"; do
+        for division in "${divisions[@]}"; do
+            echo "[MESA Radeon, channels: $channel, division: $division]" >> "$result_file"
+
+            for impl in "${gpu_implementations[@]}"; do
+                current_task=$((current_task + 1))
+                echo ">>> $current_task/$total_tasks Processing $impl[MESA Radeon, channels: $channel, division: $division]"  # Output to stdout
+
+                fps=$(python test.py --impl "$impl" --channels "$channel" --division "$division" | grep Mean | awk '{print $NF}')
+
+                if [ -z "$fps" ]; then
+                    echo "$impl: failed" >> "$result_file"
+                    continue
+                fi
+                echo "$impl: $fps fps" >> "$result_file"
+            done
+
+            echo "" >> "$result_file"
+        done
+    done
+
+    # Test GPU implementations with NVIDIA
+    export MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+    for channel in "${channels[@]}"; do
+        for division in "${divisions[@]}"; do
+            echo "[MESA NVIDIA, channels: $channel, division: $division]" >> "$result_file"
+
+            for impl in "${gpu_implementations[@]}"; do
+                current_task=$((current_task + 1))
+                echo ">>> $current_task/$total_tasks Processing $impl[MESA NVIDIA, channels: $channel, division: $division]"  # Output to stdout
+
+                fps=$(python test.py --impl "$impl" --channels "$channel" --division "$division" | grep Mean | awk '{print $NF}')
+                
+                if [ -z "$fps" ]; then
+                    echo "$impl: failed" >> "$result_file"
+                    continue
+                fi
+                echo "$impl: $fps fps" >> "$result_file"
+            done
+
+            echo "" >> "$result_file"
+        done
+    done
+fi
