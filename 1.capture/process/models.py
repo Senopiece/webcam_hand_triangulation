@@ -60,12 +60,11 @@ class PoV(BaseModel):
     cam_idx: int
     cap: cv2.VideoCapture
     parameters: CameraParams
-
-    frame: cv2.typing.MatLike
-    
-    hand_landmarks: List[np.ndarray] | None
-
     tracker: HandTrackersPool
+
+    frame: cv2.typing.MatLike | None = None
+    
+    hand_landmarks: List[np.ndarray] | None = None
 
     class Config:
         arbitrary_types_allowed = True

@@ -5,18 +5,19 @@
 
 # TODO: Calibrate using global optimization (for now stereoCalibration is used that utilizes only information of each camera with the pivot camera, but with using global optimization we can utilize the data between other pairs to improve accuracy and consistency among the cameras between each other)
 
-# TODO: faster render
 # TODO: separate out and in jsons
 
 import asyncio
 import sys
-from typing import Set
+import time
+from typing import Any, List, Tuple
 import cv2
 import numpy as np
 import json5
 import argparse
 
 from models import PoV
+from async_cb import AsyncCBThreadedSolution, CBProcessingPool
 
 async def main():
     # Set up argument parser to accept various parameters
@@ -68,6 +69,12 @@ async def main():
         default=None,
         help="Index of the pivot (reference) camera",
     )
+    parser.add_argument(
+        "--division",
+        type=int,
+        default=4,
+        help="Number of workers to process frames (per camera)",
+    )
 
     args = parser.parse_args()
     cameras_path = args.file
@@ -97,7 +104,7 @@ async def main():
 
     # Initialize video captures
     print("\nLaunching...")
-    povs: Set[PoV] = set()
+    povs: List[PoV] = []
     for camera_conf in cameras_confs:
         idx = camera_conf["index"]
         cap = cv2.VideoCapture(idx)
@@ -129,7 +136,13 @@ async def main():
         cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_AUTOSIZE)
 
         # Initialize camera data
-        povs.add(PoV(cap=cap))
+        povs.append(PoV(
+            cam_id=idx,
+            cap=cap,
+            processor=CBProcessingPool(
+                [AsyncCBThreadedSolution(chessboard_size) for _ in range(args.division)],
+            )
+        ))
 
     # Collect camera indices
     camera_indices = [camera_conf["index"] for camera_conf in cameras_confs]
@@ -168,97 +181,131 @@ async def main():
 
     shots_count = 0
 
-    # Capture images
-    while True:
-        # Read frames from all cameras
-        for pov in povs:
-            cap = pov.cap
-            ret, frame = cap.read()
-            if not ret:
-                print(f"Error: Could not read from camera {idx}")
-                continue
-
-            pov.frame = frame
-
-        # Display and detect corners
-        for pov in povs:
-            idx = pov.cam_id
-            frame = pov.frame
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            ret_corners, corners, meta = cv2.findChessboardCornersSBWithMeta(
-                gray,
-                chessboard_size,
-                flags=(
-                    cv2.CALIB_CB_MARKER
-                    | cv2.CALIB_CB_EXHAUSTIVE
-                    | cv2.CALIB_CB_ACCURACY
-                    | cv2.CALIB_CB_NORMALIZE_IMAGE
-                ),
-            )
-
-            if ret_corners:
-                if meta.shape[0] != chessboard_rows:
-                    corners = corners.reshape(-1, 2)
-                    corners = corners.reshape(*chessboard_size, 2)
-                    corners = corners.transpose(1, 0, 2)
-                    corners = corners.reshape(-1, 2)
-                    corners = corners[:, np.newaxis, :]
-                cv2.drawChessboardCorners(frame, chessboard_size, corners, ret_corners)
-                pov.corners = corners
-            else:
-                pov.corners = None
-
-            # Resize the frame before displaying
-            frame_height, frame_width = frame.shape[:2]
-            new_width = int(frame_width * args.window_scale)
-            new_height = int(frame_height * args.window_scale)
-            resized_frame = cv2.resize(
-                frame, (new_width, new_height), interpolation=cv2.INTER_AREA
-            )
-
-            # Display the resized frame
-            cv2.imshow(f"Camera_{idx}", resized_frame)
-
-        key = cv2.waitKey(1)
-        if key & 0xFF == ord("q"):
-            print("Exiting calibration script.")
-            sys.exit()
-
-        elif key & 0xFF == ord("c"):
-            # Verify shot
-            missing_cameras = [
-                pov for pov in povs.values() if pov.corners is None
-            ]
-            if missing_cameras:
-                print("Not all cameras have detected the pattern.")
-                print(f"+- Cameras missing pattern: {sorted(missing_cameras)}")
-                continue
-
-            # Collect detected corners
+    async def feeding_loop():
+        nonlocal shots_count
+        while True:
+            tasks = []
             for pov in povs:
-                pov.shots.append(pov.corners)
-            shots_count += 1
+                idx = pov.cam_id
+                ret, frame = pov.cap.read()
 
-            # Print how many shots remains
-            print(f"Captured {shots_count}/{calibration_images_needed}.")
+                if not ret:
+                    print(f"Error: Could not read from camera {idx}", out=sys.stderr)
+                    sys.exit(1)
 
-        elif key & 0xFF == ord("s"):
-            # Check if can proceed
-            if shots_count < calibration_images_needed:
-                remaining_shots = calibration_images_needed - shots_count
-                print(
-                    f"Not enough shots collected. Please capture {remaining_shots} more shots."
+                tasks.append(pov.processor.send(frame))
+
+            await asyncio.gather(*tasks)
+
+            key = cv2.waitKey(1)
+            if key & 0xFF == ord("q"):
+                break
+
+            elif key & 0xFF == ord("c"):
+                # Verify shot
+                missing_cameras = [
+                    pov for pov in povs if pov.corners is None
+                ]
+                if missing_cameras:
+                    print("Not all cameras have detected the pattern.")
+                    print(f"+- Cameras missing pattern: {sorted(missing_cameras)}")
+                    continue
+
+                # Collect detected corners
+                for pov in povs:
+                    pov.shots.append(pov.corners)
+                shots_count += 1
+
+                # Print how many shots remains
+                print(f"Captured {shots_count}/{calibration_images_needed}.")
+
+            elif key & 0xFF == ord("s"):
+                # Check if can proceed
+                if shots_count < calibration_images_needed:
+                    remaining_shots = calibration_images_needed - shots_count
+                    print(
+                        f"Not enough shots collected. Please capture {remaining_shots} more shots."
+                    )
+                    continue
+
+                print("\nProceeding to calibration...")
+                break
+    
+    run = True
+
+    async def consuming_loop():
+        # FPS tracking variables
+        fps_counter = 0
+        fps = 0
+        fps_display_time = time.time()
+        
+        # Loop untill said to stop but make sure to process what remains
+        while (
+            run
+            or any(
+                not pov.processor.idle_workers.full() for pov in povs
+            )  # any channel is in processing -> new results may arrive
+            or any(
+                not pov.processor.results.empty() for pov in povs
+            )  # any channel has non empty results -> need to process them
+        ):
+            # NOTE: it will hang freeing if channels got not equal amounts of .send calls
+            results: List[Tuple[PoV, Any, cv2.typing.MatLike]] = await asyncio.gather(
+                *[pov.processor.results.get() for pov in povs]
+            )
+            
+            # Display and detect corners
+            for pov, (res, frame) in zip(povs, results):
+                idx = pov.cam_id
+                pov.frame = frame
+                pov.corners = res
+
+                # Resize the frame before displaying
+                frame_height, frame_width = frame.shape[:2]
+                new_width = int(frame_width * args.window_scale)
+                new_height = int(frame_height * args.window_scale)
+                resized_frame = cv2.resize(
+                    frame, (new_width, new_height), interpolation=cv2.INTER_AREA
                 )
-                continue
 
-            print("\nProceeding to calibration...")
-            break
+                # Add FPS to the frame
+                cv2.putText(
+                    resized_frame,
+                    f"FPS: {fps}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    1,
+                )
+
+                # Display the resized frame
+                cv2.imshow(f"Camera_{idx}", resized_frame)
+            
+            # FPS counter update every second
+            fps_counter += 1
+            current_time = time.time()
+            if current_time - fps_display_time >= 1.0:
+                fps_display_time = current_time
+                fps = fps_counter
+                fps_counter = 0
+    
+    # Run loops: consume asyncronusly and join with feeding
+    consuming_task = asyncio.create_task(consuming_loop())
+    await feeding_loop()
+
+    # Finalize
+    run = False  # notify consuming to stop
+    await consuming_task  # wait for it to finish
 
     # Release resources after loop
     for pov in povs:
         pov.cap.release()
     cv2.destroyAllWindows()
+
+    # Skip if not enough data
+    if shots_count < calibration_images_needed:
+        return
 
     # Prepare object points based on the real-world dimensions of the calibration pattern
     objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)

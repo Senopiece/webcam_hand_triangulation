@@ -61,7 +61,7 @@ async def main():
         sys.exit(1)
 
     # Initialize
-    povs: Set[PoV] = set()
+    povs: List[PoV] = []
     for idx, cam_param in cameras_params.items():
         # Initialize video capture
         cap = cv2.VideoCapture(idx)
@@ -144,11 +144,11 @@ async def main():
         ):
             # NOTE: it will hang freeing if channels got not equal amounts of .send calls
             results: List[Tuple[PoV, NamedTuple, cv2.typing.MatLike]] = await asyncio.gather(
-                *[(pov, *pov.tracker.results.get()) for pov in povs]
+                *[pov.tracker.results.get() for pov in povs]
             )
 
             # Extract landmarks and processed frames
-            for pov, res, frame in results:
+            for pov, (res, frame) in zip(povs, results):
                 pov.frame = frame
                 pov.hand_landmarks = None
 
