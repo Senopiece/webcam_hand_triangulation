@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 import cv2
 import numpy as np
 from pydantic import BaseModel, Field
@@ -19,7 +19,7 @@ class CamConf(BaseModel):
     index: int
     intrinsic: IntrinsicConf
     extrinsic: ExtrinsicConf
-    focus: Optional[float] = None
+    focus: float
 
 class IntrinsicCameraParams(BaseModel):
     mtx: np.ndarray
@@ -44,7 +44,7 @@ class CameraParams(BaseModel):
     intrinsic: IntrinsicCameraParams
     extrinsic: ExtrinsicCameraParams
     P: np.ndarray = Field(init=False)
-    focus: Optional[float] = None
+    focus: float
 
     def __init__(self, **data):
         super().__init__(**data)

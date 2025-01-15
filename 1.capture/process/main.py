@@ -88,6 +88,8 @@ async def main():
                 file=sys.stderr,
             )
             sys.exit(1)
+        
+        # Make window for the pov
         cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_AUTOSIZE)
 
         # Initialize hands trackers for each camera
