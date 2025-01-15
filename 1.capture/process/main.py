@@ -107,6 +107,7 @@ async def main():
         while True:
             tasks = []
             for pov in povs:
+                idx = pov.cam_idx
                 ret, frame = pov.cap.read()
 
                 if not ret:
