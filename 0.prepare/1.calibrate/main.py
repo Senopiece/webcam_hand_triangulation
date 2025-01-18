@@ -5,12 +5,11 @@
 
 # TODO: Calibrate using global optimization (for now stereoCalibration is used that utilizes only information of each camera with the pivot camera, but with using global optimization we can utilize the data between other pairs to improve accuracy and consistency among the cameras between each other)
 
-# TODO: separate out and in jsons
-
 import asyncio
+from os import path
 import sys
 import time
-from typing import Any, List, Tuple
+from typing import List, Tuple
 import cv2
 import numpy as np
 import json5
@@ -23,10 +22,16 @@ async def main():
     # Set up argument parser to accept various parameters
     parser = argparse.ArgumentParser(description="Camera Calibration Script")
     parser.add_argument(
-        "--file",
+        "--ifile",
         type=str,
-        default="setup.json5",
-        help="Path to the state declarations file",
+        default="cameras.def.json5",
+        help="Path to the cameras declaration file",
+    )
+    parser.add_argument(
+        "--ofile",
+        type=str,
+        default="cameras.calib.json5",
+        help="Path to the calibration file to be written",
     )
     parser.add_argument(
         "--n",
@@ -77,7 +82,8 @@ async def main():
     )
 
     args = parser.parse_args()
-    cameras_path = args.file
+    input_file_path = args.ifile
+    output_file_path = args.ofile
     calibration_images_needed = args.n
 
     # Parse chessboard size argument
@@ -91,39 +97,46 @@ async def main():
     square_size = args.square_size
 
     # Load camera configurations from the JSON file
-    with open(cameras_path, "r") as f:
+    with open(input_file_path, "r") as f:
         cameras_confs = json5.load(f)
-
-    # Notify if calibration already exists
-    if not args.force and any(
-        "extrinsic" in cam or (("intrinsic" in cam) and not args.use_existing_intrinsics)
-        for cam in cameras_confs
-    ):
-        print("Some calibration already exists. Use --force to overwrite.", file=sys.stderr)
+    
+    if len(set(conf["index"] for conf in cameras_confs)) < 2:
+        print("Need at least two cameras.")
         sys.exit(1)
 
+    # Notify if calibration already exists
+    cameras_calib = []
+    if path.exists(output_file_path):
+        if not args.force:
+            print("Calibration output already exists. Use --force to overwrite.", file=sys.stderr)
+            sys.exit(1)
+    
+        with open(output_file_path, "r") as f:
+            cameras_calib = json5.load(f)
+
     # Initialize video captures
-    print("\nLaunching...")
+    print("\nInitalizing cameras...")
     povs: List[PoV] = []
     for camera_conf in cameras_confs:
         idx = camera_conf["index"]
-        cap = cv2.VideoCapture(idx)
+        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
         if not cap.isOpened():
             print(f"Error: Could not open camera {idx}", file=sys.stderr)
             sys.exit(1)
+
+        # Set 60 fps
+        size = list(map(int, camera_conf["size"].split("x")))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, size[0])
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, size[1])
+        cap.set(cv2.CAP_PROP_FPS, camera_conf["fps"])
 
         # Disable autofocus
         autofocus_supported = cap.get(cv2.CAP_PROP_AUTOFOCUS) != -1
         if autofocus_supported:
             cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         
-        # Set 60 fps
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 848)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_FPS, 60)
-
         # Set manual focus value
-        focus_value = camera_conf.get("focus", 0)
+        focus_value = camera_conf["focus"]
         focus_supported = cap.set(cv2.CAP_PROP_FOCUS, focus_value)
         if not focus_supported:
             print(
@@ -143,6 +156,8 @@ async def main():
                 [AsyncCBThreadedSolution(chessboard_size) for _ in range(args.division)],
             )
         ))
+
+        print(f"Camera {idx} setup complete")
 
     # Collect camera indices
     camera_indices = [camera_conf["index"] for camera_conf in cameras_confs]
@@ -204,7 +219,7 @@ async def main():
             elif key & 0xFF == ord("c"):
                 # Verify shot
                 missing_cameras = [
-                    pov for pov in povs if pov.corners is None
+                    pov.cam_id for pov in povs if pov.corners is None
                 ]
                 if missing_cameras:
                     print("Not all cameras have detected the pattern.")
@@ -250,7 +265,7 @@ async def main():
             )  # any channel has non empty results -> need to process them
         ):
             # NOTE: it will hang freeing if channels got not equal amounts of .send calls
-            results: List[Tuple[PoV, Any, cv2.typing.MatLike]] = await asyncio.gather(
+            results: List[Tuple[np.ndarray, cv2.typing.MatLike]] = await asyncio.gather(
                 *[pov.processor.results.get() for pov in povs]
             )
             
@@ -315,12 +330,16 @@ async def main():
     # Perform intrinsic calibrations
     for pov in povs:
         idx = pov.cam_id
-        cam_conf = next(conf for conf in cameras_confs if conf["index"] == idx)
 
-        if args.use_existing_intrinsics and "intrinsic" in cam_conf:
+        cam_calib = next((calib for calib in cameras_calib if calib["index"] == idx), None)
+        if cam_calib is None:
+            cam_calib = {"index": idx}
+            cameras_calib.append(cam_calib)
+
+        if args.use_existing_intrinsics and "intrinsic" in cam_calib:
             print(f"Using existing intrinsic parameters for camera {idx}.")
             # Reconstruct camera matrix and distortion coefficients
-            intrinsic_conf = cam_conf["intrinsic"]
+            intrinsic_conf = cam_calib["intrinsic"]
             fx = intrinsic_conf["focal_length_pixels"][0]
             fy = intrinsic_conf["focal_length_pixels"][1]
             s = intrinsic_conf["skew_coefficient"]
@@ -333,7 +352,7 @@ async def main():
             ret, mtx, dist_coeffs, _, _ = cv2.calibrateCamera(
                 [objp for _ in range(shots_count)],
                 pov.shots,
-                pov.frame.shape[::-1],
+                pov.frame.shape[1::-1],
                 None,
                 None,
             )
@@ -344,7 +363,7 @@ async def main():
             s, cx, cy = mtx[0, 1], mtx[0, 2], mtx[1, 2]
 
             # Store intrinsic parameters
-            cam_conf["intrinsic"] = {
+            cam_calib["intrinsic"] = {
                 "focal_length_pixels": [fx, fy],
                 "skew_coefficient": s,
                 "principal_point": [cx, cy],
@@ -358,15 +377,15 @@ async def main():
     print("\nComputing transformations relative to the pivot camera...")
 
     # Pivot camera extrinsic is identity
-    pivot_cam_conf = next(conf for conf in cameras_confs if conf["index"] == reference_idx)
-    pivot_cam_conf["extrinsic"] = {
+    pivot_cam_calib = next(calib for calib in cameras_calib if calib["index"] == reference_idx)
+    pivot_cam_calib["extrinsic"] = {
         "translation_mm": [0, 0, 0],
         "rotation_rodrigues": [0, 0, 0],
-        "rotation_matrix": [
-            [1, 0, 0],
-            [0, 1, 0],
-            [0, 0, 1],
-        ],
+        # "rotation_matrix": [
+        #     [1, 0, 0],
+        #     [0, 1, 0],
+        #     [0, 0, 1],
+        # ],
     }
 
     # Prepare shared data before transoformation compute
@@ -379,11 +398,13 @@ async def main():
     mtx1 = ref_pov.mtx
     dist1 = ref_pov.dist_coeffs
 
-    image_size = ref_pov.frame.shape[::-1]
+    image_size = ref_pov.frame.shape[1::-1]
 
     # Compute transformations for each camera relative to the pivot
     for pov in povs:
-        if pov.cam_id == reference_idx:
+        idx = pov.cam_id
+
+        if idx == reference_idx:
             continue
 
         imgpoints2 = pov.shots
@@ -409,8 +430,8 @@ async def main():
             flags=cv2.CALIB_FIX_INTRINSIC,
         )
 
-        cam_conf = next(conf for conf in cameras_confs if conf["index"] == idx)
-        cam_conf["extrinsic"] = {
+        cam_calib = next(calib for calib in cameras_calib if calib["index"] == idx)
+        cam_calib["extrinsic"] = {
             "translation_mm": T.flatten().tolist(),
             "rotation_rodrigues": cv2.Rodrigues(R)[0].flatten().tolist(),
             # "rotation_matrix": R.tolist(),
@@ -419,9 +440,9 @@ async def main():
         print(f"Computed transformation from camera {reference_idx} to camera {idx}.")
 
     # Save calibrations
-    with open(cameras_path, "w") as f:
-        json5.dump(cameras_confs, f, indent=4)
-    print("\nCameras file updated with intrinsic and extrinsic parameters.")
+    with open(output_file_path, "w") as f:
+        json5.dump(cameras_calib, f, indent=4)
+    print("\Calibration file is written with intrinsic and extrinsic parameters.")
 
 if __name__ == "__main__":
     asyncio.run(main())

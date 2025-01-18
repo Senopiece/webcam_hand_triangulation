@@ -1,10 +1,13 @@
 import asyncio
-from typing import List, NamedTuple, Set, Tuple
+import threading
+from typing import Dict, List, NamedTuple, Tuple
 import cv2
 import mediapipe as mp
 import argparse
 import sys
 import time
+
+import numpy as np
 
 from async_hands import AsyncHandsThreadedBuildinSolution, HandTrackersPool
 from cam_conf import load_cameras_parameters
@@ -26,10 +29,16 @@ async def main():
         description="3D Hand Reconstruction using MediaPipe and Multiple Cameras"
     )
     parser.add_argument(
-        "--file",
+        "--dfile",
         type=str,
-        default="setup.json5",
+        default="cameras.def.json5",
         help="Path to the cameras declarations file",
+    )
+    parser.add_argument(
+        "--cfile",
+        type=str,
+        default="cameras.calib.json5",
+        help="Path to the cameras calibration file",
     )
     parser.add_argument(
         "--window_scale",
@@ -50,52 +59,69 @@ async def main():
         help="Number of the hand tracking workers pool per camera",
     )
     args = parser.parse_args()
-    cameras_path = args.file
     do_render = args.render
     division = args.division
 
     # Load camera parameters
-    cameras_params = load_cameras_parameters(cameras_path)
+    cameras_params = load_cameras_parameters(args.dfile, args.cfile)
     if len(cameras_params) < 2:
         print("Need at least two cameras with calibration data.")
         sys.exit(1)
+    
+    run = True
 
     # Initialize
+    last_frame: Dict[int, cv2.typing.MatLike] = {idx: None for idx in cameras_params.keys()}
     povs: List[PoV] = []
     for idx, cam_param in cameras_params.items():
-        # Initialize video capture
-        cap = cv2.VideoCapture(idx)
-        if not cap.isOpened():
-            print(f"Error: Could not open camera {idx}", out=sys.stderr)
-            sys.exit(1)
-
-        # Set 60 fps
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 848)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_FPS, 60)
-
-        # Disable autofocus
-        autofocus_supported = cap.get(cv2.CAP_PROP_AUTOFOCUS) != -1
-        if autofocus_supported:
-            cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
-
-        # Set manual focus value
-        focus_value = cam_param.focus
-        focus_supported = cap.set(cv2.CAP_PROP_FOCUS, focus_value)
-        if not focus_supported:
-            print(
-                f"Camera {idx} does not support manual focus! (or an invalid focus value provided)",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        
         # Make window for the pov
         cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_AUTOSIZE)
 
+        def cap_reading_thread(idx: int):
+            # Initialize video capture
+            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+            if not cap.isOpened():
+                print(f"Error: Could not open camera {idx}", out=sys.stderr)
+                sys.exit(1)
+
+            # Set 60 fps
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, cam_param.size[0])
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cam_param.size[1])
+            cap.set(cv2.CAP_PROP_FPS, cam_param.fps)
+
+            # Disable autofocus
+            autofocus_supported = cap.get(cv2.CAP_PROP_AUTOFOCUS) != -1
+            if autofocus_supported:
+                cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+
+            # Set manual focus value
+            focus_value = cam_param.focus
+            focus_supported = cap.set(cv2.CAP_PROP_FOCUS, focus_value)
+            if not focus_supported:
+                print(
+                    f"Camera {idx} does not support manual focus! (or an invalid focus value provided)",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            
+            while run:
+                ret, frame = cap.read()
+
+                if not ret:
+                    print(f"Error: Could not read from camera {idx}", out=sys.stderr)
+                    sys.exit(1)
+                
+                last_frame[idx] = frame
+            
+            cap.release()
+        
+        cap_thread = threading.Thread(target=cap_reading_thread, args=(idx,))
+        cap_thread.start()
+
         # Initialize hands trackers for each camera
-        povs.add(PoV(
-            idx=idx,
-            cap=cap,
+        povs.append(PoV(
+            cam_idx=idx,
+            cap_thread=cap_thread,
             tracker=HandTrackersPool(
                 [AsyncHandsThreadedBuildinSolution() for _ in range(division)],
             ),
@@ -103,30 +129,36 @@ async def main():
         ),)
     
     async def feeding_loop():
-        # NOTE: Using only .tracker (the send side) and .cap from PoV
+        target_frame_interval = 1 / 60  # Approximately 0.01667 seconds
+
         while True:
+            if all(last_frame[idx] is not None for idx in cameras_params.keys()):
+                break
+
+            await asyncio.sleep(0.1)
+
+        while True:
+            start_time = time.time()
+            
             tasks = []
             for pov in povs:
                 idx = pov.cam_idx
-                ret, frame = pov.cap.read()
-
-                if not ret:
-                    print(f"Error: Could not read from camera {idx}", out=sys.stderr)
-                    sys.exit(1)
+                frame = last_frame[idx]
 
                 tasks.append(pov.tracker.send(frame))
 
             await asyncio.gather(*tasks)
 
+            # Rate limit to have at max 60 FPS
+            elapsed_time = time.time() - start_time
+            sleep_time = max(0, target_frame_interval - elapsed_time)
+            await asyncio.sleep(sleep_time)
+
             key = cv2.waitKey(1)
             if key & 0xFF == ord("q"):
                 break
 
-    run = True
-
     async def consuming_loop():
-        # NOTE: Using .tracker (the recieve side), and all the other except for .cap from PoV
-
         # FPS tracking variables
         fps_counter = 0
         fps = 0
@@ -143,39 +175,28 @@ async def main():
             )  # any channel has non empty results -> need to process them
         ):
             # NOTE: it will hang freeing if channels got not equal amounts of .send calls
-            results: List[Tuple[PoV, NamedTuple, cv2.typing.MatLike]] = await asyncio.gather(
+            results: List[Tuple[np.ndarray, cv2.typing.MatLike]] = await asyncio.gather(
                 *[pov.tracker.results.get() for pov in povs]
             )
 
-            # Extract landmarks and processed frames
-            for pov, (res, frame) in zip(povs, results):
+            for pov, (hand_landmarks, frame) in zip(povs, results):
+                pov.hand_landmarks = hand_landmarks
                 pov.frame = frame
-                pov.hand_landmarks = None
-
-                if res.multi_hand_landmarks:
-                    for hand_landmarks, handedness in zip(
-                        res.multi_hand_landmarks, res.multi_handedness
-                    ):
-                        if (
-                            handedness.classification[0].label == "Right"
-                        ):  # actually left lol
-                            pov.hand_landmarks = hand_landmarks.landmark
-                            break
 
             # Triangulate points
             chosen_cams = []
             points_3d = []
-            povs_with_landmarks = {
+            povs_with_landmarks = [
                 pov for pov in povs if pov.hand_landmarks is not None
-            }
+            ]
             if len(povs_with_landmarks) >= 2:
                 for lm_id in range(num_landmarks):
                     # Prepare landmarks contexts
-                    lmcs = set()
+                    lmcs = []
                     for pov in povs_with_landmarks:
                         point = landmark_to_pixel_coord(pov.frame.shape, pov.hand_landmarks[lm_id])
                         undistorted_lm = undistort_pixel_coord(point, pov.parameters.intrinsic.mtx, pov.parameters.intrinsic.dist_coeffs)
-                        lmcs.add(ContextedLandmark(cam_idx=pov.cam_idx, P=pov.parameters.P, lm=undistorted_lm))
+                        lmcs.append(ContextedLandmark(cam_idx=pov.cam_idx, P=pov.parameters.P, lm=undistorted_lm))
 
                     # Triangulate
                     chosen, point_3d = triangulate_lmcs(lmcs)
@@ -295,7 +316,7 @@ async def main():
 
     # Release resources
     for pov in povs:
-        pov.cap.release()
+        pov.cap_thread.join()
     await asyncio.gather(*[pov.tracker.dispose() for pov in povs])
     cv2.destroyAllWindows()
 

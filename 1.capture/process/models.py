@@ -1,25 +1,10 @@
+import threading
 from typing import List
 import cv2
 import numpy as np
 from pydantic import BaseModel, Field
 
 from async_hands import HandTrackersPool
-
-class IntrinsicConf(BaseModel):
-    focal_length_pixels: List[float] = Field(..., min_items=2, max_items=2)
-    skew_coefficient: float
-    principal_point: List[float] = Field(..., min_items=2, max_items=2)
-    dist_coeffs: List[float]
-
-class ExtrinsicConf(BaseModel):
-    translation_mm: List[float] = Field(..., min_items=3, max_items=3)
-    rotation_rodrigues: List[float] = Field(..., min_items=3, max_items=3)
-
-class CamConf(BaseModel):
-    index: int
-    intrinsic: IntrinsicConf
-    extrinsic: ExtrinsicConf
-    focus: float
 
 class IntrinsicCameraParams(BaseModel):
     mtx: np.ndarray
@@ -31,11 +16,7 @@ class IntrinsicCameraParams(BaseModel):
 class ExtrinsicCameraParams(BaseModel):
     rvec: np.ndarray
     T: np.ndarray
-    R: np.ndarray = Field(init=False)
-
-    def __init__(self, **data):
-        super().__init__(**data)
-        self.R, _ = cv2.Rodrigues(self.rvec)
+    R: np.ndarray
 
     class Config:
         arbitrary_types_allowed = True
@@ -43,22 +24,17 @@ class ExtrinsicCameraParams(BaseModel):
 class CameraParams(BaseModel):
     intrinsic: IntrinsicCameraParams
     extrinsic: ExtrinsicCameraParams
-    P: np.ndarray = Field(init=False)
+    P: np.ndarray
     focus: float
-
-    def __init__(self, **data):
-        super().__init__(**data)
-
-        # Make Projection matrix
-        RT = np.hstack((self.extrinsic.R, self.extrinsic.T))  # Rotation and translation
-        self.P = self.intrinsic.mtx @ RT  # Projection matrix
+    fps: float
+    size: List[float] = Field(..., min_items=2, max_items=2)
 
     class Config:
         arbitrary_types_allowed = True
 
 class PoV(BaseModel):
     cam_idx: int
-    cap: cv2.VideoCapture
+    cap_thread: threading.Thread
     parameters: CameraParams
     tracker: HandTrackersPool
 
@@ -69,7 +45,10 @@ class PoV(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-class ContextedLandmark:
+class ContextedLandmark(BaseModel):
     cam_idx: int
     P: np.ndarray
     lm: np.ndarray # undistorted pixel coords
+
+    class Config:
+        arbitrary_types_allowed = True

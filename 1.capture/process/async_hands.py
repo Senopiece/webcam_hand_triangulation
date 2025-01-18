@@ -100,7 +100,20 @@ class AsyncHandsThreadedBuildinSolution(_ThreadedAsyncHands):
         )
 
         def send(frame):
-            return hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            res = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            
+            res_hand_landmarks = None
+            if res.multi_hand_landmarks:
+                for hand_landmarks, handedness in zip(
+                    res.multi_hand_landmarks, res.multi_handedness
+                ):
+                    if (
+                        handedness.classification[0].label == "Right"
+                    ):  # actually left lol
+                        res_hand_landmarks = hand_landmarks.landmark
+                        break
+            
+            return (res_hand_landmarks, frame)
 
         super().__init__(send, hands.close)
 
@@ -130,7 +143,7 @@ class HandTrackersPool:
         if prev_task is not None:
             await prev_task
 
-        self.results.put_nowait((res, frame))
+        self.results.put_nowait(res)
 
     async def send(self, frame):
         """

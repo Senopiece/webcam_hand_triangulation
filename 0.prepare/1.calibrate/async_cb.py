@@ -141,7 +141,7 @@ class CBProcessingPool:
         if prev_task is not None:
             await prev_task
 
-        self.results.put_nowait((res, frame))
+        self.results.put_nowait(res)
 
     async def send(self, frame):
         """

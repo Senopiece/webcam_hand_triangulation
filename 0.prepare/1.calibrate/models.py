@@ -2,7 +2,7 @@
 from typing import Any, List
 import cv2
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from async_cb import CBProcessingPool
 
@@ -14,7 +14,7 @@ class PoV(BaseModel):
     frame: cv2.typing.MatLike | None = None
     corners: Any | None = None
 
-    shots: List[Any] = []
+    shots: List[np.ndarray] = []
 
     mtx: np.ndarray | None = None
     dist_coeffs: np.ndarray | None = None

@@ -1,7 +1,6 @@
 [
     {
-        index: 1,
-        focus: 260,
+        index: 0,
         intrinsic: {
             focal_length_pixels: [
                 660.9978633989125,
@@ -34,8 +33,7 @@
         },
     },
     {
-        index: 2,
-        focus: 260,
+        index: 1,
         intrinsic: {
             focal_length_pixels: [
                 648.5967682510827,
@@ -68,8 +66,7 @@
         },
     },
     {
-        index: 3,
-        focus: 260,
+        index: 2,
         intrinsic: {
             focal_length_pixels: [
                 655.6248987218847,
@@ -102,8 +99,7 @@
         },
     },
     {
-        index: 4,
-        focus: 260,
+        index: 3,
         intrinsic: {
             focal_length_pixels: [
                 651.8216344734,

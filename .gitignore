@@ -175,6 +175,7 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
-setup.json5
+cameras.def.json5
+cameras.calib.json5
 hand_landmarker.task
 test.mkv

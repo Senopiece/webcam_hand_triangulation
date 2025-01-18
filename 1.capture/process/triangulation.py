@@ -1,5 +1,5 @@
 from itertools import combinations
-from typing import Set
+from typing import List, Set
 import cv2
 import numpy as np
 
@@ -22,7 +22,7 @@ def stereo_triangulate_lmcs(P1, P2, lm1, lm2):
     return X
 
 
-def best_stereo_triangulate_lmcs(lmcs: Set[ContextedLandmark]):
+def best_stereo_triangulate_lmcs(lmcs: List[ContextedLandmark]):
     """
     Triangulate 3D point from multiple camera views.
     Makes all stereo projections and chooses the best
@@ -58,7 +58,7 @@ def best_stereo_triangulate_lmcs(lmcs: Set[ContextedLandmark]):
 
     return [lmc.cam_idx for lmc in best_lmcs], best_point
 
-def triangulate_lmcs(lmcs: Set[ContextedLandmark]):
+def triangulate_lmcs(lmcs: List[ContextedLandmark]):
     """
     Triangulate 3D point from multiple point of views.
     Alternative to best_stereo_triangulate_point using custom svg
