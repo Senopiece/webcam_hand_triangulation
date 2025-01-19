@@ -1,3 +1,4 @@
+import multiprocessing
 import threading
 from typing import List
 import cv2
@@ -34,7 +35,7 @@ class CameraParams(BaseModel):
 
 class PoV(BaseModel):
     cam_idx: int
-    cap_thread: threading.Thread
+    cap_process: multiprocessing.Process
     parameters: CameraParams
     tracker: AsyncWorkersPool
 

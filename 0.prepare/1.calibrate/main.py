@@ -5,12 +5,16 @@
 
 # TODO: Calibrate using global optimization (for now stereoCalibration is used that utilizes only information of each camera with the pivot camera, but with using global optimization we can utilize the data between other pairs to improve accuracy and consistency among the cameras between each other)
 
+import os
+
+os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
+import cv2
+
 import asyncio
 from os import path
 import sys
 import time
 from typing import List, Tuple
-import cv2
 import numpy as np
 import json5
 import argparse
