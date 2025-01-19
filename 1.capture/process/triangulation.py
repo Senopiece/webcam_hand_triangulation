@@ -1,10 +1,11 @@
 from itertools import combinations
-from typing import List, Set
+from typing import List
 import cv2
 import numpy as np
 
 from models import ContextedLandmark
 from projection import project
+
 
 def stereo_triangulate_lmcs(P1, P2, lm1, lm2):
     # Requires undistorted pixel coords landmarks as input
@@ -82,3 +83,4 @@ def triangulate_lmcs(lmcs: List[ContextedLandmark]):
         return [lmc.cam_idx for lmc in lmcs], X[:3]
     else:
         return [], None
+

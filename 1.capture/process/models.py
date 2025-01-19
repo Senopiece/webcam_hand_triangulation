@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from pydantic import BaseModel, Field
 
-from async_hands import HandTrackersPool
+from workers.pool import AsyncWorkersPool
 
 class IntrinsicCameraParams(BaseModel):
     mtx: np.ndarray
@@ -36,7 +36,7 @@ class PoV(BaseModel):
     cam_idx: int
     cap_thread: threading.Thread
     parameters: CameraParams
-    tracker: HandTrackersPool
+    tracker: AsyncWorkersPool
 
     frame: cv2.typing.MatLike | None = None
     
@@ -52,3 +52,7 @@ class ContextedLandmark(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+
+class Landmark(BaseModel):
+    x: float
+    y: float

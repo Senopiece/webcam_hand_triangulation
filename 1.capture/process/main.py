@@ -9,7 +9,8 @@ import time
 
 import numpy as np
 
-from async_hands import AsyncHandsThreadedBuildinSolution, HandTrackersPool
+from workers.pool import AsyncWorkersPool
+from hands import AsyncHandsThreadedBuildinSolution
 from cam_conf import load_cameras_parameters
 from models import ContextedLandmark, PoV
 from landmark2pixel_coord import landmark_to_pixel_coord
@@ -122,7 +123,7 @@ async def main():
         povs.append(PoV(
             cam_idx=idx,
             cap_thread=cap_thread,
-            tracker=HandTrackersPool(
+            tracker=AsyncWorkersPool(
                 [AsyncHandsThreadedBuildinSolution() for _ in range(division)],
             ),
             parameters=cam_param,
