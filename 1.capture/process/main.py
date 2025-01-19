@@ -188,9 +188,7 @@ async def main():
                 idx = pov.cam_idx
                 # last_frame is a Manager dict, so we do an explicit copy for local usage
                 frame = last_frame[idx]
-                if frame is not None:
-                    frame_copy = frame.copy()  # local copy
-                    tasks.append(pov.tracker.send(frame_copy))
+                tasks.append(pov.tracker.send(frame.copy()))
 
             # Send frames to the tracking workers
             await asyncio.gather(*tasks)
