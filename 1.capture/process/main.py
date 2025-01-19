@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from typing import Dict, List, NamedTuple, Tuple
+from typing import Dict, List, Tuple
 import cv2
 import mediapipe as mp
 import argparse
@@ -55,7 +55,7 @@ async def main():
     parser.add_argument(
         "--division",
         type=int,
-        default=4,
+        default=8,
         help="Number of the hand tracking workers pool per camera",
     )
     args = parser.parse_args()
@@ -71,7 +71,7 @@ async def main():
     run = True
 
     # Initialize
-    last_frame: Dict[int, cv2.typing.MatLike] = {idx: None for idx in cameras_params.keys()}
+    last_frame: Dict[int, np.ndarray] = {idx: None for idx in cameras_params.keys()}
     povs: List[PoV] = []
     for idx, cam_param in cameras_params.items():
         # Make window for the pov
@@ -136,6 +136,10 @@ async def main():
                 break
 
             await asyncio.sleep(0.1)
+        
+        # FPS tracking variables
+        fps_counter = 0
+        fps_display_time = time.time()
 
         while True:
             start_time = time.time()
@@ -143,25 +147,34 @@ async def main():
             tasks = []
             for pov in povs:
                 idx = pov.cam_idx
-                frame = last_frame[idx]
+                frame = last_frame[idx].copy()
 
                 tasks.append(pov.tracker.send(frame))
 
             await asyncio.gather(*tasks)
+
+            key = cv2.waitKey(1)
+            if key & 0xFF == ord("q"):
+                break
+
+            # FPS counter update every second
+            fps_counter += 1
+            current_time = time.time()
+            if current_time - fps_display_time >= 1.0:
+                print("Send fps:", fps_counter)
+                print("Idle workers:", [pov.tracker.idle_workers.qsize() for pov in povs])
+                print("Results queue size:", [pov.tracker.results.qsize() for pov in povs])
+                fps_display_time = current_time
+                fps_counter = 0
 
             # Rate limit to have at max 60 FPS
             elapsed_time = time.time() - start_time
             sleep_time = max(0, target_frame_interval - elapsed_time)
             await asyncio.sleep(sleep_time)
 
-            key = cv2.waitKey(1)
-            if key & 0xFF == ord("q"):
-                break
-
     async def consuming_loop():
         # FPS tracking variables
         fps_counter = 0
-        fps = 0
         fps_display_time = time.time()
 
         # Loop untill said to stop but make sure to process what remains
@@ -210,8 +223,8 @@ async def main():
             fps_counter += 1
             current_time = time.time()
             if current_time - fps_display_time >= 1.0:
+                print("Consume fps:", fps_counter)
                 fps_display_time = current_time
-                fps = fps_counter
                 fps_counter = 0
 
             # Draw on frames and display them
@@ -278,17 +291,6 @@ async def main():
                 new_height = int(frame_height * args.window_scale)
                 resized_frame = cv2.resize(
                     frame, (new_width, new_height), interpolation=cv2.INTER_AREA
-                )
-
-                # Add FPS to the frame
-                cv2.putText(
-                    resized_frame,
-                    f"FPS: {fps}",
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    1,
                 )
 
                 # Display the resized frame
