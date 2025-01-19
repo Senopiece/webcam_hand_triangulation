@@ -105,6 +105,10 @@ async def main():
                 )
                 sys.exit(1)
             
+            # FPS tracking variables
+            fps_counter = 0
+            fps_display_time = time.time()
+            
             while run:
                 ret, frame = cap.read()
 
@@ -113,6 +117,14 @@ async def main():
                     sys.exit(1)
                 
                 last_frame[idx] = frame
+
+                # FPS counter update every second
+                fps_counter += 1
+                current_time = time.time()
+                if current_time - fps_display_time >= 1.0:
+                    print(f"Cam {idx} fps:", fps_counter)
+                    fps_display_time = current_time
+                    fps_counter = 0
             
             cap.release()
         
