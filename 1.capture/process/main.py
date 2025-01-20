@@ -115,7 +115,7 @@ async def main():
     parser.add_argument(
         "--division",
         type=int,
-        default=8,
+        default=4,
         help="Number of the hand tracking worker pool per camera",
     )
     args = parser.parse_args()
