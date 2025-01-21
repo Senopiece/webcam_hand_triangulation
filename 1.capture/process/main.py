@@ -82,7 +82,7 @@ def cap_reading(
             fps_counter = 0
 
     cap.release()
-    print(f"Camera {idx} process finishing.")
+    print(f"Camera {idx} finished.")
 
 
 def coupling_loop(
@@ -131,6 +131,7 @@ def coupling_loop(
         time.sleep(sleep_time)
     
     coupled_frames_queue.finalize()
+    print("Coupling loop finished.")
 
 
 def processing_loop(
@@ -259,6 +260,7 @@ def processing_loop(
         coupled_frames_queue.task_done()
     
     hands.close()
+    print("A processing loop is finished.")
 
 
 def ordering_loop(
@@ -292,6 +294,7 @@ def ordering_loop(
         in_queue.task_done()
     
     out_queue.finalize()
+    print("A ordering loop finished.")
 
 
 def display_loop(
@@ -327,6 +330,8 @@ def display_loop(
             stop_event.set()
 
         frame_queue.task_done()
+    
+    print(f"Display {idx} loop finished.")
 
 
 def main():
