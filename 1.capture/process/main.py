@@ -100,7 +100,6 @@ def coupling_loop(
     fps_display_time = time.time()
     index = 0
 
-    frames = []
     while True:
         index += 1
         start_time = time.time()
@@ -114,6 +113,7 @@ def coupling_loop(
             fps_display_time = current_time
             fps_counter = 0
 
+        frames = []
         for frame in last_frame:
             frames.append(frame.get())
 
