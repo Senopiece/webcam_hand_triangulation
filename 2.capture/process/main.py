@@ -1,10 +1,11 @@
 import os
 import threading
 
+import numpy as np
+
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 import cv2
 
-import multiprocessing
 from typing import Any, Dict, List, Tuple
 import mediapipe as mp
 import argparse
@@ -13,22 +14,17 @@ import time
 
 from cam_conf import load_cameras_parameters
 from models import CameraParams, ContextedLandmark
-from landmark2pixel_coord import landmark_to_pixel_coord
-from distortion import undistort_pixel_coord
 from threading_shared_numpy_array import SharedNumpyArray
 from triangulation import triangulate_lmcs
 from projection import distorted_project
 from finalizable_queue import EmptyFinalized, FinalizableQueue
 from finalizable_thread_queue import ThreadFinalizableQueue
-from finalizable_multiprocessing_queue import MultiprocessingFinalizableQueue
-from hands import SyncHandsMultiprocessedBuildinSolution
 
 
 mp_hands = mp.solutions.hands
 num_landmarks = 21  # MediaPipe Hands has 21 landmarks
 
 
-# TODO: maybe mv directly to coupling_loop and do `frames = [cap.read() for cap in caps]`
 def cap_reading(
         idx: int,
         stop_event: threading.Event,
@@ -136,23 +132,6 @@ def coupling_loop(
     coupled_frames_queue.finalize()
     print("Coupling loop finished.")
 
-def process_frame(args):
-    processor, frame = args
-
-    # Convert to RGB and process
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    res = processor.process(frame_rgb)
-
-    # Convert MediaPipe landmarks to plain Python list
-    if res.multi_hand_landmarks:
-        for hand_landmarks, handedness in zip(
-            res.multi_hand_landmarks,
-            res.multi_handedness
-        ):
-            if handedness.classification[0].label == "Right":
-                return hand_landmarks.landmark
-    
-    return None
 
 def processing_loop(
         scale: float,
@@ -161,7 +140,12 @@ def processing_loop(
         out_queues: List[FinalizableQueue],
     ):
     processors = [
-        SyncHandsMultiprocessedBuildinSolution() for _ in range(len(cameras_params))
+        mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,
+            min_detection_confidence=0.9,
+            min_tracking_confidence=0.9,
+        ) for _ in range(len(cameras_params))
     ]
 
     while True:
@@ -174,11 +158,22 @@ def processing_loop(
         frames: List[cv2.typing.MatLike] = elem[1]
 
         # Find landmarks
+        landmarks = []
         for processor, frame in zip(processors, frames):
-            processor.send(frame)
-        
-        landmarks = list(map(lambda processor: processor.wait_result(), processors))
-        
+            # Convert to RGB and process
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            res = processor.process(frame_rgb)
+
+            # Convert MediaPipe landmarks to plain Python list
+            if res.multi_hand_landmarks:
+                for hand_landmarks, handedness in zip(
+                    res.multi_hand_landmarks, 
+                    res.multi_handedness
+                ):
+                    if handedness.classification[0].label == "Right":
+                        landmarks.append(hand_landmarks.landmark)
+                        break
+                
         povs_with_landmarks = [i for i, landmarks in enumerate(landmarks) if landmarks is not None]
         if len(povs_with_landmarks) >= 2:
             # Triangulate points across the cameras
@@ -188,14 +183,22 @@ def processing_loop(
                 lmcs = []
                 for pov_i in povs_with_landmarks:
                     pov_params = cameras_params[pov_i]
-                    pixel_pt = landmark_to_pixel_coord(
-                        frames[pov_i].shape, landmarks[pov_i][lm_id]
-                    )
-                    undistorted_lm = undistort_pixel_coord(
-                        pixel_pt,
-                        pov_params.intrinsic.mtx,
-                        pov_params.intrinsic.dist_coeffs,
-                    )
+
+                    # Landmark to pixel coord
+                    lm = landmarks[pov_i][lm_id]
+                    h, w, _ = frames[pov_i].shape
+                    pixel_pt = [lm.x * w, lm.y * h]
+
+                    # Undistort pixel coord
+                    intrinsics = pov_params.intrinsic
+                    undistorted_lm = cv2.undistortPoints(
+                        np.array([[pixel_pt]], dtype=np.float32),
+                        intrinsics.mtx,
+                        intrinsics.dist_coeffs,
+                        P=intrinsics.mtx,
+                    )[0][0]
+
+                    # Append the result
                     lmcs.append(
                         ContextedLandmark(
                             cam_idx=pov_i,
@@ -266,7 +269,7 @@ def processing_loop(
         coupled_frames_queue.task_done()
     
     for processor in processors:
-        processor.dispose()
+        processor.close()
     
     print("A processing loop is finished.")
 
@@ -367,7 +370,7 @@ def main():
     parser.add_argument(
         "--division",
         type=int,
-        default=6,
+        default=4,
         help="Number of the hand tracking worker pool per camera",
     )
     args = parser.parse_args()

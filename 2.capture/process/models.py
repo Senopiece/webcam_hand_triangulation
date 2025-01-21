@@ -35,7 +35,3 @@ class ContextedLandmark(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
-
-class Landmark(BaseModel):
-    x: float
-    y: float

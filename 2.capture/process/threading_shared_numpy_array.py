@@ -8,5 +8,5 @@ class SharedNumpyArray:
     def set(self, array: np.ndarray | None):
         self.data = array
 
-    def get(self):
+    def get(self) -> np.ndarray | None:
         return self.data
