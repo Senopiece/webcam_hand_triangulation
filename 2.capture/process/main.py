@@ -118,7 +118,7 @@ def coupling_loop(
 
         frames = []
         for frame in last_frame:
-            frames.append(frame.get())
+            frames.append(frame.get().copy())
 
         # Send coupled frames
         coupled_frames_queue.put((index, frames))
