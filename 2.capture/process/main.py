@@ -14,12 +14,13 @@ import time
 
 from cam_conf import load_cameras_parameters
 from models import CameraParams, ContextedLandmark
-from threading_shared_numpy_array import SharedNumpyArray
+from wrapped import Wrapped
 from triangulation import triangulate_lmcs
 from projection import distorted_project
 from finalizable_queue import EmptyFinalized, FinalizableQueue
 from finalizable_thread_queue import ThreadFinalizableQueue
-
+from fps_counter import FPSCounter
+from draw_utils import draw_left_top, draw_right_bottom
 
 mp_hands = mp.solutions.hands
 num_landmarks = 21  # MediaPipe Hands has 21 landmarks
@@ -28,7 +29,7 @@ num_landmarks = 21  # MediaPipe Hands has 21 landmarks
 def cap_reading(
         idx: int,
         stop_event: threading.Event,
-        my_last_frame: SharedNumpyArray,
+        my_last_frame: Wrapped[Tuple[np.ndarray, int] | None],
         cam_param: CameraParams,
     ):
     # Initialize video capture
@@ -58,7 +59,7 @@ def cap_reading(
         sys.exit(1)
 
     # FPS tracking variables
-    fps_counter = 0
+    fps_counter = FPSCounter()
     fps_display_time = time.time()
 
     while True:
@@ -70,15 +71,8 @@ def cap_reading(
             print(f"Error: Could not read from camera {idx}", file=sys.stderr)
             break
 
-        my_last_frame.set(frame)
-
-        # Simple FPS measure
-        fps_counter += 1
-        current_time = time.time()
-        if current_time - fps_display_time >= 1.0:
-            print(f"Cam {idx} fps:", fps_counter)
-            fps_display_time = current_time
-            fps_counter = 0
+        my_last_frame.set((frame, fps_counter.get_fps()))
+        fps_counter.count()
 
     cap.release()
     print(f"Camera {idx} finished.")
@@ -86,7 +80,7 @@ def cap_reading(
 
 def coupling_loop(
         stop_event: threading.Event,
-        last_frame: List[SharedNumpyArray],
+        last_frame: List[Wrapped[Tuple[np.ndarray, int] | None]],
         coupled_frames_queue: FinalizableQueue,
     ):
     target_frame_interval = 1 / 30.0  # ~30 FPS
@@ -97,8 +91,7 @@ def coupling_loop(
             break
         time.sleep(0.1)
 
-    fps_counter = 0
-    fps_display_time = time.time()
+    fps_counter = FPSCounter()
     index = 0
 
     while True:
@@ -107,21 +100,15 @@ def coupling_loop(
         if stop_event.is_set():
             break
 
-        # Print send FPS
-        fps_counter += 1
-        current_time = time.time()
-        if current_time - fps_display_time >= 1.0:
-            print("Send fps:", fps_counter)
-            print("Coupled frames queue size:", coupled_frames_queue.qsize(), "/", index)
-            fps_display_time = current_time
-            fps_counter = 0
+        fps_counter.count()
 
         frames = []
         for frame in last_frame:
-            frames.append(frame.get().copy())
+            frame, fps = frame.get()
+            frames.append((frame.copy(), fps))
 
         # Send coupled frames
-        coupled_frames_queue.put((index, frames))
+        coupled_frames_queue.put((index, frames, fps_counter.get_fps()))
         index += 1
 
         # Rate-limit to ~60 FPS
@@ -135,6 +122,7 @@ def coupling_loop(
 
 def processing_loop(
         scale: float,
+        draw_origin_landmarks: bool,
         cameras_params: List[CameraParams],
         coupled_frames_queue: FinalizableQueue,
         out_queues: List[FinalizableQueue],
@@ -155,7 +143,11 @@ def processing_loop(
             break
 
         index: int = elem[0]
-        frames: List[cv2.typing.MatLike] = elem[1]
+        frames: List[Tuple[np.ndarray, int]] = elem[1]
+        coupling_fps: int = elem[2]
+
+        cap_fps: List[int] = [item[1] for item in frames]
+        frames: List[np.ndarray] = [item[0] for item in frames]
 
         # Find landmarks
         landmarks = []
@@ -173,12 +165,13 @@ def processing_loop(
                     if handedness.classification[0].label == "Right":
                         landmarks.append(hand_landmarks.landmark)
                         break
-                
+        
         povs_with_landmarks = [i for i, landmarks in enumerate(landmarks) if landmarks is not None]
+
+        # Triangulate points across the cameras
+        chosen_cams = []
+        points_3d = []
         if len(povs_with_landmarks) >= 2:
-            # Triangulate points across the cameras
-            chosen_cams = []
-            points_3d = []
             for lm_id in range(num_landmarks):
                 lmcs = []
                 for pov_i in povs_with_landmarks:
@@ -212,9 +205,40 @@ def processing_loop(
 
                 chosen_cams.append(chosen)
                 points_3d.append(point_3d)
+        
+        # Resize frames before drawing
+        for i, frame in enumerate(frames):
+            frame_height, frame_width = frame.shape[:2]
+            new_width = int(frame_width * scale)
+            new_height = int(frame_height * scale)
+            frames[i] = cv2.resize(
+                frame, (new_width, new_height), interpolation=cv2.INTER_AREA
+            )
 
-            # Draw on frames
-            for i, (frame, params) in enumerate(zip(frames, cameras_params)):
+        # Draw original landmarks
+        if draw_origin_landmarks:
+            for origin_landmarks, frame in zip(landmarks, frames):
+                if origin_landmarks is None:
+                    continue
+
+                h, w, _ = frame.shape
+                for connection in mp_hands.HAND_CONNECTIONS:
+                    start_idx, end_idx = connection
+                    start_pt = origin_landmarks[start_idx]
+                    end_pt = origin_landmarks[end_idx]
+                    cv2.line(
+                        frame,
+                        (int(start_pt.x * w), int(start_pt.y * h)),
+                        (int(end_pt.x * w), int(end_pt.y * h)),
+                        color=(0, 200, 200),
+                        thickness=1,
+                    )
+                for lm in origin_landmarks:
+                    cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), radius=3, color=(0, 200, 200), thickness=-1)
+        
+        # Draw reprojected landmarks
+        if len(povs_with_landmarks) >= 2:
+            for pov_i, (frame, params) in enumerate(zip(frames, cameras_params)):
                 # Project 3D points onto each camera
                 reprojected_lms: List[Tuple[float, float]] = []
                 for point_3d in points_3d:
@@ -225,46 +249,50 @@ def processing_loop(
                         params.intrinsic.mtx,
                         params.intrinsic.dist_coeffs,
                     )
+
+                    # camera pixel coordinates -> normalized coordinates
+                    x, y = x / params.size[0], y / params.size[1]
+
+                    # normalized coordinates -> real viewport pixel coordinates
+                    h, w, _ = frame.shape
+                    x, y = x * w, y * h
+
                     # Clip to image size
                     x = max(min(int(x), frame.shape[1] - 1), 0)
                     y = max(min(int(y), frame.shape[0] - 1), 0)
+
                     reprojected_lms.append((x, y))
 
-                # Draw connections first
+                # Draw reptojected landmarks
                 for connection in mp_hands.HAND_CONNECTIONS:
                     start_idx, end_idx = connection
-                    if (
-                        start_idx in reprojected_lms
-                        and end_idx in reprojected_lms
-                    ):
-                        start_pt = reprojected_lms[start_idx]
-                        end_pt = reprojected_lms[end_idx]
-                        cv2.line(
-                            frame,
-                            start_pt,
-                            end_pt,
-                            color=(255, 255, 255),
-                            thickness=2,
-                        )
-
-                # Draw landmarks
-                for lm_id, point_3d in enumerate(points_3d):
-                    x, y = reprojected_lms[lm_id]
-                    if i in chosen_cams[lm_id]:
+                    start_pt = reprojected_lms[start_idx]
+                    end_pt = reprojected_lms[end_idx]
+                    cv2.line(
+                        frame,
+                        start_pt,
+                        end_pt,
+                        color=(255, 255, 255),
+                        thickness=1,
+                    )
+                for involved_in_triangulating_this_lm, lm in zip(chosen_cams, reprojected_lms):
+                    if pov_i in involved_in_triangulating_this_lm:
                         color = (0, 255, 0)  # Chosen camera
                     else:
                         color = (255, 0, 0)  # Others
-                    cv2.circle(frame, (x, y), radius=5, color=color, thickness=-1)
-
-        # Resize before display
-        for i, frame in enumerate(frames):
-            frame_height, frame_width = frame.shape[:2]
-            new_width = int(frame_width * scale)
-            new_height = int(frame_height * scale)
-            resized_frame = cv2.resize(
-                frame, (new_width, new_height), interpolation=cv2.INTER_AREA
-            )
-            out_queues[i].put((index, resized_frame))
+                    cv2.circle(frame, lm, radius=3, color=color, thickness=-1)
+        
+        # Draw coupling fps on the first pov
+        draw_right_bottom(1, f"Couple FPS: {coupling_fps}", frames[0])
+        draw_right_bottom(0, f"Debt: {coupled_frames_queue.qsize()}", frames[0])
+        
+        # Draw cap fps for every pov
+        for fps, frame in zip(cap_fps, frames):
+            draw_left_top(0, f"Capture FPS: {fps}", frame)
+        
+        # Write results
+        for out_queue, frame in zip(out_queues, frames):
+            out_queue.put((index, frame))
         
         coupled_frames_queue.task_done()
     
@@ -315,8 +343,7 @@ def display_loop(
     ):
     cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_AUTOSIZE)
 
-    fps_counter = 0
-    fps_display_time = time.time()
+    fps_counter = FPSCounter()
 
     while True:
         try:
@@ -324,15 +351,12 @@ def display_loop(
         except EmptyFinalized:
             break
 
-        cv2.imshow(f"Camera_{idx}", frame)
+        # Draw FPS text on the frame
+        fps_counter.count()
+        draw_left_top(1, f"Display FPS: {fps_counter.get_fps()}", frame)
 
-        # Print FPS
-        fps_counter += 1
-        current_time = time.time()
-        if current_time - fps_display_time >= 1.0:
-            print(f"Display {idx} fps:", fps_counter)
-            fps_display_time = current_time
-            fps_counter = 0
+        # Update the frame
+        cv2.imshow(f"Camera_{idx}", frame)
         
         # Maybe stop
         key = cv2.waitKey(1)
@@ -348,12 +372,6 @@ def display_loop(
 def main():
     parser = argparse.ArgumentParser(
         description="3D Hand Reconstruction using MediaPipe and Multiple Cameras"
-    )
-    parser.add_argument(
-        "--dfile",
-        type=str,
-        default="cameras.def.json5",
-        help="Path to the cameras declarations file",
     )
     parser.add_argument(
         "--cfile",
@@ -373,12 +391,19 @@ def main():
         default=4,
         help="Number of the hand tracking worker pool per camera",
     )
+    parser.add_argument(
+        "-ol",
+        "--origin_landmarks",
+        help="Draw origin landmarks",
+        action="store_true"
+    )
     args = parser.parse_args()
     window_scale = args.window_scale
     division = args.division
+    draw_origin_landmarks = args.origin_landmarks
 
     # Load camera parameters
-    cameras_params = load_cameras_parameters(args.dfile, args.cfile)
+    cameras_params = load_cameras_parameters(args.cfile)
     if len(cameras_params) < 2:
         print("Need at least two cameras with calibration data.")
         sys.exit(1)
@@ -387,8 +412,8 @@ def main():
 
     # Shared
     cams_stop_event = threading.Event()
-    last_frame: List[SharedNumpyArray] = [
-        SharedNumpyArray()
+    last_frame: List[Wrapped[Tuple[np.ndarray, int] | None]] = [
+        Wrapped()
         for _ in cameras_ids
     ]
 
@@ -403,7 +428,7 @@ def main():
     for process in cap_processes:
         process.start()
     
-    # Run the feeding loop in the foreground; it exits when user presses 'q'
+    # Couple frames
     coupled_frames_queue = ThreadFinalizableQueue()
     coupling_worker = threading.Thread(
         target=coupling_loop,
@@ -417,7 +442,7 @@ def main():
     processing_loops_pool = [
         threading.Thread(
             target=processing_loop,
-            args=(window_scale, list(cameras_params.values()), coupled_frames_queue, processed_queues),
+            args=(window_scale, draw_origin_landmarks, list(cameras_params.values()), coupled_frames_queue, processed_queues),
             daemon=True,
         ) for _ in range(division)
     ]

@@ -1,17 +1,15 @@
 from typing import Dict
 import cv2
-from pydantic import ValidationError
 from models import CameraParams, ExtrinsicCameraParams, IntrinsicCameraParams
 import json5
 import numpy as np
 
 
-def load_cam_params(cam_decl, cameras_calibs):
+def load_cam_params(cam_decl):
     idx = cam_decl["index"]
-    calib = next(calib for calib in cameras_calibs if calib["index"] == idx)
 
     # Intrinsic parameters
-    intrinsic = calib["intrinsic"]
+    intrinsic = cam_decl["intrinsic"]
     intrinsic_mtx = np.array(
         [
             [
@@ -30,7 +28,7 @@ def load_cam_params(cam_decl, cameras_calibs):
     dist_coeffs = np.array(intrinsic["dist_coeffs"])
 
     # Extrinsic parameters
-    extrinsic = calib["extrinsic"]
+    extrinsic = cam_decl["extrinsic"]
 
     T = np.array([extrinsic["translation_mm"]], dtype=np.float64).T
     if T.shape != (3, 1):
@@ -58,16 +56,13 @@ def load_cam_params(cam_decl, cameras_calibs):
     )
 
 
-def load_cameras_parameters(decls_file: str, calibrations_file: str) -> Dict[int, CameraParams]:
-    with open(decls_file, "r") as f:
-        cameras_decls = json5.load(f)
-    
+def load_cameras_parameters(calibrations_file: str) -> Dict[int, CameraParams]:
     with open(calibrations_file, "r") as f:
         cameras_calibs = json5.load(f)
 
     cameras: Dict[int, CameraParams] = {}
-    for cam_decl in cameras_decls:
-        idx, params = load_cam_params(cam_decl, cameras_calibs)
+    for cam_decl in cameras_calibs:
+        idx, params = load_cam_params(cam_decl)
         cameras[idx] = params
 
     return cameras

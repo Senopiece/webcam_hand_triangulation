@@ -109,17 +109,33 @@ async def main():
     if len(set(conf["index"] for conf in cameras_confs)) < 2:
         print("Need at least two cameras.")
         sys.exit(1)
+    
+    # Merge with existing calibration inrrinsics
+    if args.use_existing_intrinsics:
+        with open(output_file_path, "r") as f:
+            cameras_calibs = json5.load(f)
+        
+        for conf in cameras_confs:
+            idx = conf["index"]
+            calib = next((calib for calib in cameras_calibs if calib["index"] == idx), None)
+            if calib is None:
+                continue
+            if calib["focus"] != conf["focus"]:
+                continue
+            if calib["size"] != conf["size"]:
+                continue
+            if calib["fps"] != conf["fps"]:
+                continue
+            conf["intrinsic"] = calib["intrinsic"]
+        
+        del cameras_calibs
 
     # Notify if calibration already exists
-    cameras_calib = []
     if path.exists(output_file_path):
         if not args.force:
             print("Calibration output already exists. Use --force to overwrite.", file=sys.stderr)
             sys.exit(1)
     
-        with open(output_file_path, "r") as f:
-            cameras_calib = json5.load(f)
-
     # Initialize video captures
     print("\nInitalizing cameras...")
     povs: List[PoV] = []
@@ -337,10 +353,7 @@ async def main():
     for pov in povs:
         idx = pov.cam_id
 
-        cam_calib = next((calib for calib in cameras_calib if calib["index"] == idx), None)
-        if cam_calib is None:
-            cam_calib = {"index": idx}
-            cameras_calib.append(cam_calib)
+        cam_calib = next(calib for calib in cameras_confs if calib["index"] == idx)
 
         if args.use_existing_intrinsics and "intrinsic" in cam_calib:
             print(f"Using existing intrinsic parameters for camera {idx}.")
@@ -383,7 +396,7 @@ async def main():
     print("\nComputing transformations relative to the pivot camera...")
 
     # Pivot camera extrinsic is identity
-    pivot_cam_calib = next(calib for calib in cameras_calib if calib["index"] == reference_idx)
+    pivot_cam_calib = next(calib for calib in cameras_confs if calib["index"] == reference_idx)
     pivot_cam_calib["extrinsic"] = {
         "translation_mm": [0, 0, 0],
         "rotation_rodrigues": [0, 0, 0],
@@ -436,7 +449,7 @@ async def main():
             flags=cv2.CALIB_FIX_INTRINSIC,
         )
 
-        cam_calib = next(calib for calib in cameras_calib if calib["index"] == idx)
+        cam_calib = next(calib for calib in cameras_confs if calib["index"] == idx)
         cam_calib["extrinsic"] = {
             "translation_mm": T.flatten().tolist(),
             "rotation_rodrigues": cv2.Rodrigues(R)[0].flatten().tolist(),
@@ -447,8 +460,8 @@ async def main():
 
     # Save calibrations
     with open(output_file_path, "w") as f:
-        json5.dump(cameras_calib, f, indent=4)
-    print("\Calibration file is written with intrinsic and extrinsic parameters.")
+        json5.dump(cameras_confs, f, indent=4)
+    print("\nCalibration file is written with intrinsic and extrinsic parameters.")
 
 if __name__ == "__main__":
     asyncio.run(main())
