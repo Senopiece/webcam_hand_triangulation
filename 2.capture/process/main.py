@@ -60,7 +60,6 @@ def cap_reading(
 
     # FPS tracking variables
     fps_counter = FPSCounter()
-    fps_display_time = time.time()
 
     while True:
         if stop_event.is_set():
