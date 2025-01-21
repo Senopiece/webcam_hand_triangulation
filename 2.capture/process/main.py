@@ -93,7 +93,7 @@ def coupling_loop(
         last_frame: List[SharedNumpyArray],
         coupled_frames_queue: FinalizableQueue,
     ):
-    target_frame_interval = 1 / 60.0  # ~60 FPS
+    target_frame_interval = 1 / 30.0  # ~30 FPS
 
     # Wait until at least one frame is available from all cameras
     while True:
