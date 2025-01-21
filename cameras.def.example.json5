@@ -2,25 +2,25 @@
     {
         index: 0,
         focus: 260,
-        size: "848x480",
+        size: "1280x960",
         fps: 60,
     },
     {
         index: 1,
         focus: 260,
-        size: "848x480",
+        size: "1280x960",
         fps: 60,
     },
     {
         index: 2,
         focus: 260,
-        size: "848x480",
+        size: "1280x960",
         fps: 60,
     },
     {
         index: 3,
         focus: 260,
-        size: "848x480",
+        size: "1280x960",
         fps: 60,
     },
 ]

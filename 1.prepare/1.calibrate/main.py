@@ -64,10 +64,10 @@ async def main():
         action="store_true",
     )
     parser.add_argument(
-        "--window_scale",
-        type=float,
-        default=0.7,
-        help="Scale of a window",
+        "--window_size",
+        type=str,
+        default="448x336",
+        help="Size of a preview window",
     )
     parser.add_argument(
         "--use_existing_intrinsics",
@@ -91,6 +91,7 @@ async def main():
     input_file_path = args.ifile
     output_file_path = args.ofile
     calibration_images_needed = args.n
+    desired_window_size = tuple(map(int, args.window_size.split("x")))
 
     # Parse chessboard size argument
     try:
@@ -135,7 +136,7 @@ async def main():
         if not args.force:
             print("Calibration output already exists. Use --force to overwrite.", file=sys.stderr)
             sys.exit(1)
-    
+        
     # Initialize video captures
     print("\nInitalizing cameras...")
     povs: List[PoV] = []
@@ -176,7 +177,7 @@ async def main():
             cap=cap,
             processor=CBProcessingPool(
                 [AsyncCBThreadedSolution(chessboard_size) for _ in range(args.division)],
-            )
+            ),
         ))
 
         print(f"Camera {idx} setup complete")
@@ -298,11 +299,8 @@ async def main():
                 pov.corners = res
 
                 # Resize the frame before displaying
-                frame_height, frame_width = frame.shape[:2]
-                new_width = int(frame_width * args.window_scale)
-                new_height = int(frame_height * args.window_scale)
                 resized_frame = cv2.resize(
-                    frame, (new_width, new_height), interpolation=cv2.INTER_AREA
+                    frame, desired_window_size, interpolation=cv2.INTER_AREA
                 )
 
                 # Add FPS to the frame

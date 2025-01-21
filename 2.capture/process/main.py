@@ -120,8 +120,8 @@ def coupling_loop(
 
 
 def processing_loop(
-        scale: float,
         draw_origin_landmarks: bool,
+        desired_window_size: Tuple[float, float],
         cameras_params: List[CameraParams],
         coupled_frames_queue: FinalizableQueue,
         out_queues: List[FinalizableQueue],
@@ -207,11 +207,8 @@ def processing_loop(
         
         # Resize frames before drawing
         for i, frame in enumerate(frames):
-            frame_height, frame_width = frame.shape[:2]
-            new_width = int(frame_width * scale)
-            new_height = int(frame_height * scale)
             frames[i] = cv2.resize(
-                frame, (new_width, new_height), interpolation=cv2.INTER_AREA
+                frame, desired_window_size, interpolation=cv2.INTER_AREA
             )
 
         # Draw original landmarks
@@ -379,15 +376,15 @@ def main():
         help="Path to the cameras calibration file",
     )
     parser.add_argument(
-        "--window_scale",
-        type=float,
-        default=0.7,
-        help="Scale of a window",
+        "--window_size",
+        type=str,
+        default="448x336",
+        help="Size of a preview window",
     )
     parser.add_argument(
         "--division",
         type=int,
-        default=4,
+        default=8,
         help="Number of the hand tracking worker pool per camera",
     )
     parser.add_argument(
@@ -397,7 +394,7 @@ def main():
         action="store_true"
     )
     args = parser.parse_args()
-    window_scale = args.window_scale
+    desired_window_size = tuple(map(int, args.window_size.split("x")))
     division = args.division
     draw_origin_landmarks = args.origin_landmarks
 
@@ -441,7 +438,7 @@ def main():
     processing_loops_pool = [
         threading.Thread(
             target=processing_loop,
-            args=(window_scale, draw_origin_landmarks, list(cameras_params.values()), coupled_frames_queue, processed_queues),
+            args=(draw_origin_landmarks, desired_window_size, list(cameras_params.values()), coupled_frames_queue, processed_queues),
             daemon=True,
         ) for _ in range(division)
     ]
