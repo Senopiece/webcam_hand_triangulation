@@ -1,11 +1,6 @@
-import multiprocessing
-import threading
 from typing import List
-import cv2
 import numpy as np
 from pydantic import BaseModel, Field
-
-from workers.pool import AsyncWorkersPool
 
 class IntrinsicCameraParams(BaseModel):
     mtx: np.ndarray
@@ -33,19 +28,6 @@ class CameraParams(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-class PoV(BaseModel):
-    cam_idx: int
-    cap_process: multiprocessing.Process
-    parameters: CameraParams
-    tracker: AsyncWorkersPool
-
-    frame: cv2.typing.MatLike | None = None
-    
-    hand_landmarks: List[np.ndarray] | None = None
-
-    class Config:
-        arbitrary_types_allowed = True
-
 class ContextedLandmark(BaseModel):
     cam_idx: int
     P: np.ndarray
@@ -53,7 +35,3 @@ class ContextedLandmark(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
-
-class Landmark(BaseModel):
-    x: float
-    y: float
