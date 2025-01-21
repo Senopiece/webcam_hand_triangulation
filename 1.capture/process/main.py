@@ -26,6 +26,7 @@ mp_hands = mp.solutions.hands
 num_landmarks = 21  # MediaPipe Hands has 21 landmarks
 
 
+# TODO: maybe mv directly to coupling_loop and do `frames = [cap.read() for cap in caps]`
 def cap_reading(
         idx: int,
         stop_event: multiprocessing.synchronize.Event,
@@ -140,12 +141,14 @@ def processing_loop(
         coupled_frames_queue: FinalizableQueue,
         out_queues: List[FinalizableQueue],
     ):
-    hands = mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=1,
-        min_detection_confidence=0.9,
-        min_tracking_confidence=0.9,
-    )
+    processors = [
+        mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,
+            min_detection_confidence=0.9,
+            min_tracking_confidence=0.9,
+        ) for _ in range(len(cameras_params))
+    ]
 
     while True:
         try:
@@ -158,10 +161,10 @@ def processing_loop(
 
         # Find landmarks
         landmarks: List[Any] = []
-        for frame in frames:
+        for processor, frame in zip(processors, frames):
             # Convert to RGB and process
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            res = hands.process(frame_rgb)
+            res = processor.process(frame_rgb)
 
             # Convert MediaPipe landmarks to plain Python list
             if res.multi_hand_landmarks:
@@ -259,7 +262,9 @@ def processing_loop(
         
         coupled_frames_queue.task_done()
     
-    hands.close()
+    for processor in processors:
+        processor.close()
+    
     print("A processing loop is finished.")
 
 
