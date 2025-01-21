@@ -1,4 +1,5 @@
 import os
+import threading
 
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 import cv2
@@ -15,10 +16,10 @@ from cam_conf import load_cameras_parameters
 from models import CameraParams, ContextedLandmark
 from landmark2pixel_coord import landmark_to_pixel_coord
 from distortion import undistort_pixel_coord
-from shared_numpy_array import SharedNumpyArray
+from threading_shared_numpy_array import SharedNumpyArray
 from triangulation import triangulate_lmcs
 from projection import distorted_project
-from finalizable_queue import FinalizableQueue
+from finalizable_thread_queue import EmptyFinalized, FinalizableQueue
 
 
 mp_hands = mp.solutions.hands
@@ -85,8 +86,9 @@ def cap_reading(
 
 
 def coupling_loop(
+        stop_event: multiprocessing.synchronize.Event,
         last_frame: List[SharedNumpyArray],
-        coupled_frames_queue: FinalizableQueue
+        coupled_frames_queue: FinalizableQueue,
     ):
     target_frame_interval = 1 / 60.0  # ~60 FPS
 
@@ -101,15 +103,17 @@ def coupling_loop(
     index = 0
 
     while True:
-        index += 1
         start_time = time.time()
+
+        if stop_event.is_set():
+            break
 
         # Print send FPS
         fps_counter += 1
         current_time = time.time()
         if current_time - fps_display_time >= 1.0:
             print("Send fps:", fps_counter)
-            print("Coupled frames queue size:", coupled_frames_queue.qsize())
+            print("Coupled frames queue size:", coupled_frames_queue.qsize(), "/", index)
             fps_display_time = current_time
             fps_counter = 0
 
@@ -119,12 +123,7 @@ def coupling_loop(
 
         # Send coupled frames
         coupled_frames_queue.put((index, frames))
-
-        # Maybe stop
-        key = cv2.waitKey(1)
-        if key & 0xFF == ord("q"):
-            # Stop capturing loop
-            break
+        index += 1
 
         # Rate-limit to ~60 FPS
         elapsed_time = time.time() - start_time
@@ -148,12 +147,11 @@ def processing_loop(
     )
 
     while True:
-        # Only exit if there is not debt to process
-        if coupled_frames_queue.is_finalized() and coupled_frames_queue.empty():
+        try:
+            elem = coupled_frames_queue.get()
+        except EmptyFinalized:
             break
 
-        # Gather results from each camera
-        elem = coupled_frames_queue.get()
         index: int = elem[0]
         frames: List[cv2.typing.MatLike] = elem[1]
 
@@ -256,11 +254,11 @@ def processing_loop(
             resized_frame = cv2.resize(
                 frame, (new_width, new_height), interpolation=cv2.INTER_AREA
             )
-            out_queues[i].put((index, resized_frame,))
+            out_queues[i].put((index, resized_frame))
+        
+        coupled_frames_queue.task_done()
     
     hands.close()
-    for out_queue in out_queues:
-        out_queue.finalize()
 
 
 def ordering_loop(
@@ -270,12 +268,11 @@ def ordering_loop(
     expecting = 0
     unordered: Dict[int, Any] = {}
     while True:
-        # Only exit if there is not debt to process
-        if in_queue.is_finalized() and in_queue.empty():
+        try:
+            elem = in_queue.get()
+        except EmptyFinalized:
             break
 
-        # Extract element
-        elem = in_queue.get()
         index: int = elem[0]
         data: Any = elem[1]
 
@@ -291,12 +288,15 @@ def ordering_loop(
                     out_queue.put(data)
         else:
             unordered[index] = data
+        
+        in_queue.task_done()
     
     out_queue.finalize()
 
 
 def display_loop(
         idx: int,
+        stop_event: multiprocessing.synchronize.Event,
         frame_queue: FinalizableQueue
     ):
     cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_AUTOSIZE)
@@ -305,20 +305,28 @@ def display_loop(
     fps_display_time = time.time()
 
     while True:
-        # Only exit if there is not debt to process
-        if frame_queue.is_finalized() and frame_queue.empty():
+        try:
+            frame = frame_queue.get()
+        except EmptyFinalized:
             break
+
+        cv2.imshow(f"Camera_{idx}", frame)
 
         # Print FPS
         fps_counter += 1
         current_time = time.time()
         if current_time - fps_display_time >= 1.0:
-            print("Display fps:", fps_counter)
+            print(f"Display {idx} fps:", fps_counter)
             fps_display_time = current_time
             fps_counter = 0
+        
+        # Maybe stop
+        key = cv2.waitKey(1)
+        if key & 0xFF == ord("q"):
+            # Stop capturing loop
+            stop_event.set()
 
-        frame = frame_queue.get()
-        cv2.imshow(f"Camera_{idx}", frame)
+        frame_queue.task_done()
 
 
 def main():
@@ -346,7 +354,7 @@ def main():
     parser.add_argument(
         "--division",
         type=int,
-        default=4,
+        default=12,
         help="Number of the hand tracking worker pool per camera",
     )
     args = parser.parse_args()
@@ -362,16 +370,15 @@ def main():
     cameras_ids = list(cameras_params.keys())
 
     # Shared
-    manager = multiprocessing.Manager()
-    cams_stop_event = manager.Event()
-    last_frame = [
-        SharedNumpyArray(manager)
+    cams_stop_event = threading.Event()
+    last_frame: List[SharedNumpyArray] = [
+        SharedNumpyArray()
         for _ in cameras_ids
     ]
 
     # Capture cameras
-    cap_processes: List[multiprocessing.Process] = [
-        multiprocessing.Process(
+    cap_processes: List[threading.Thread] = [
+        threading.Thread(
             target=cap_reading,
             args=(idx, cams_stop_event, my_last_frame, cam_param),
             daemon=True,
@@ -384,7 +391,7 @@ def main():
     coupled_frames_queue = FinalizableQueue(300)
     processed_queues = [FinalizableQueue(300) for _ in cameras_ids]
     processing_loops_pool = [
-        multiprocessing.Process(
+        threading.Thread(
             target=processing_loop,
             args=(window_scale, list(cameras_params.values()), coupled_frames_queue, processed_queues),
             daemon=True,
@@ -396,7 +403,7 @@ def main():
     # Sort processing workers output
     ordered_processed_queues = [FinalizableQueue(300) for _ in cameras_ids]
     ordering_loops = [
-        multiprocessing.Process(
+        threading.Thread(
             target=ordering_loop,
             args=(in_queue, out_queue),
             daemon=True,
@@ -407,9 +414,9 @@ def main():
     
     # Displaying loops
     display_loops = [
-        multiprocessing.Process(
+        threading.Thread(
             target=display_loop,
-            args=(idx, frame_queue),
+            args=(idx, cams_stop_event, frame_queue),
             daemon=True,
         ) for idx, frame_queue in zip(cameras_ids, ordered_processed_queues)
     ]
@@ -417,25 +424,35 @@ def main():
         process.start()
 
     # Run the feeding loop in the foreground; it exits when user presses 'q'
-    coupling_loop(last_frame, coupled_frames_queue)
+    coupling_worker = threading.Thread(
+        target=coupling_loop,
+        args=(cams_stop_event, last_frame, coupled_frames_queue),
+        daemon=True,
+    )
+    coupling_worker.start()
 
-    # Signal all camera processes to stop
-    cams_stop_event.set()
+    # Wait for a stop signal
+    cams_stop_event.wait()
 
     # Free resources
     print("Freeing resources...")
+    coupling_worker.join()
+    
     for process in cap_processes:
         process.join()
     
-    manager.shutdown()
-    
     print("Waiting for lag to process...")
+    coupling_worker.join()
+
     for process in processing_loops_pool:
         process.join()
-    
+
+    for queue in processed_queues:
+        queue.finalize()
+
     for process in ordering_loops:
         process.join()
-    
+
     for process in display_loops:
         process.join()
 
