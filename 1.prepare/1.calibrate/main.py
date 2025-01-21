@@ -22,6 +22,8 @@ import argparse
 from models import PoV
 from async_cb import AsyncCBThreadedSolution, CBProcessingPool
 
+# TODO: rewrite to threads to be in style sync with the capture/process
+
 async def main():
     # Set up argument parser to accept various parameters
     parser = argparse.ArgumentParser(description="Camera Calibration Script")
