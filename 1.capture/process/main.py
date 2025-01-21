@@ -5,7 +5,6 @@ os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 import cv2
 
 import multiprocessing
-import multiprocessing.synchronize
 from typing import Any, Dict, List, Tuple
 import mediapipe as mp
 import argparse
@@ -19,7 +18,10 @@ from distortion import undistort_pixel_coord
 from threading_shared_numpy_array import SharedNumpyArray
 from triangulation import triangulate_lmcs
 from projection import distorted_project
-from finalizable_thread_queue import EmptyFinalized, FinalizableQueue
+from finalizable_queue import EmptyFinalized, FinalizableQueue
+from finalizable_thread_queue import ThreadFinalizableQueue
+from finalizable_multiprocessing_queue import MultiprocessingFinalizableQueue
+from hands import SyncHandsMultiprocessedBuildinSolution
 
 
 mp_hands = mp.solutions.hands
@@ -29,7 +31,7 @@ num_landmarks = 21  # MediaPipe Hands has 21 landmarks
 # TODO: maybe mv directly to coupling_loop and do `frames = [cap.read() for cap in caps]`
 def cap_reading(
         idx: int,
-        stop_event: multiprocessing.synchronize.Event,
+        stop_event: threading.Event,
         my_last_frame: SharedNumpyArray,
         cam_param: CameraParams,
     ):
@@ -87,7 +89,7 @@ def cap_reading(
 
 
 def coupling_loop(
-        stop_event: multiprocessing.synchronize.Event,
+        stop_event: threading.Event,
         last_frame: List[SharedNumpyArray],
         coupled_frames_queue: FinalizableQueue,
     ):
@@ -120,7 +122,7 @@ def coupling_loop(
 
         frames = []
         for frame in last_frame:
-            frames.append(frame.get().copy())
+            frames.append(frame.get())
 
         # Send coupled frames
         coupled_frames_queue.put((index, frames))
@@ -134,6 +136,23 @@ def coupling_loop(
     coupled_frames_queue.finalize()
     print("Coupling loop finished.")
 
+def process_frame(args):
+    processor, frame = args
+
+    # Convert to RGB and process
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    res = processor.process(frame_rgb)
+
+    # Convert MediaPipe landmarks to plain Python list
+    if res.multi_hand_landmarks:
+        for hand_landmarks, handedness in zip(
+            res.multi_hand_landmarks,
+            res.multi_handedness
+        ):
+            if handedness.classification[0].label == "Right":
+                return hand_landmarks.landmark
+    
+    return None
 
 def processing_loop(
         scale: float,
@@ -142,13 +161,8 @@ def processing_loop(
         out_queues: List[FinalizableQueue],
     ):
     processors = [
-        mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=1,
-            min_detection_confidence=0.9,
-            min_tracking_confidence=0.9,
-        ) for _ in range(len(cameras_params))
-    ] # One processor per camera
+        SyncHandsMultiprocessedBuildinSolution() for _ in range(len(cameras_params))
+    ]
 
     while True:
         try:
@@ -160,21 +174,10 @@ def processing_loop(
         frames: List[cv2.typing.MatLike] = elem[1]
 
         # Find landmarks
-        landmarks: List[Any] = []
         for processor, frame in zip(processors, frames):
-            # Convert to RGB and process
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            res = processor.process(frame_rgb)
-
-            # Convert MediaPipe landmarks to plain Python list
-            if res.multi_hand_landmarks:
-                for hand_landmarks, handedness in zip(
-                    res.multi_hand_landmarks,
-                    res.multi_handedness
-                ):
-                    if handedness.classification[0].label == "Right":
-                        landmarks.append(hand_landmarks.landmark)
-                        break
+            processor.send(frame)
+        
+        landmarks = list(map(lambda processor: processor.wait_result(), processors))
         
         povs_with_landmarks = [i for i, landmarks in enumerate(landmarks) if landmarks is not None]
         if len(povs_with_landmarks) >= 2:
@@ -263,7 +266,7 @@ def processing_loop(
         coupled_frames_queue.task_done()
     
     for processor in processors:
-        processor.close()
+        processor.dispose()
     
     print("A processing loop is finished.")
 
@@ -304,7 +307,7 @@ def ordering_loop(
 
 def display_loop(
         idx: int,
-        stop_event: multiprocessing.synchronize.Event,
+        stop_event: threading.Event,
         frame_queue: FinalizableQueue
     ):
     cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_AUTOSIZE)
@@ -364,7 +367,7 @@ def main():
     parser.add_argument(
         "--division",
         type=int,
-        default=12,
+        default=6,
         help="Number of the hand tracking worker pool per camera",
     )
     args = parser.parse_args()
@@ -397,9 +400,17 @@ def main():
     for process in cap_processes:
         process.start()
     
+    # Run the feeding loop in the foreground; it exits when user presses 'q'
+    coupled_frames_queue = ThreadFinalizableQueue()
+    coupling_worker = threading.Thread(
+        target=coupling_loop,
+        args=(cams_stop_event, last_frame, coupled_frames_queue),
+        daemon=True,
+    )
+    coupling_worker.start()
+    
     # Processing workers
-    coupled_frames_queue = FinalizableQueue(300)
-    processed_queues = [FinalizableQueue(300) for _ in cameras_ids]
+    processed_queues = [ThreadFinalizableQueue() for _ in cameras_ids]
     processing_loops_pool = [
         threading.Thread(
             target=processing_loop,
@@ -411,7 +422,7 @@ def main():
         process.start()
 
     # Sort processing workers output
-    ordered_processed_queues = [FinalizableQueue(300) for _ in cameras_ids]
+    ordered_processed_queues = [ThreadFinalizableQueue() for _ in cameras_ids]
     ordering_loops = [
         threading.Thread(
             target=ordering_loop,
@@ -432,14 +443,6 @@ def main():
     ]
     for process in display_loops:
         process.start()
-
-    # Run the feeding loop in the foreground; it exits when user presses 'q'
-    coupling_worker = threading.Thread(
-        target=coupling_loop,
-        args=(cams_stop_event, last_frame, coupled_frames_queue),
-        daemon=True,
-    )
-    coupling_worker.start()
 
     # Wait for a stop signal
     cams_stop_event.wait()

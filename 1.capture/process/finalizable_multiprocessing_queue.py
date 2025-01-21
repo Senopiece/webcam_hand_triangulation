@@ -1,13 +1,12 @@
-import queue
-import threading
+from multiprocessing import Queue, Condition, Lock
 from finalizable_queue import EmptyFinalized, FinalizableQueue
 
-class ThreadFinalizableQueue(FinalizableQueue):
+class MultiprocessingFinalizableQueue(FinalizableQueue):
     def __init__(self):
-        self._queue = queue.Queue()
+        self._queue = Queue()
         self._finalized = False
-        self._lock = threading.Lock()
-        self._non_empty_or_finalized = threading.Condition()
+        self._lock = Lock()
+        self._non_empty_or_finalized = Condition()
 
     def put(self, item):
         with self._non_empty_or_finalized:
@@ -28,8 +27,7 @@ class ThreadFinalizableQueue(FinalizableQueue):
                 self._non_empty_or_finalized.wait()
     
     def task_done(self):
-        with self._lock:
-            return self._queue.task_done()
+        pass
     
     def qsize(self):
         return self._queue.qsize()
