@@ -120,7 +120,7 @@ def coupling_loop(
 
         frames = []
         for frame in last_frame:
-            frames.append(frame.get())
+            frames.append(frame.get().copy())
 
         # Send coupled frames
         coupled_frames_queue.put((index, frames))
@@ -148,7 +148,7 @@ def processing_loop(
             min_detection_confidence=0.9,
             min_tracking_confidence=0.9,
         ) for _ in range(len(cameras_params))
-    ]
+    ] # One processor per camera
 
     while True:
         try:
