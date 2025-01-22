@@ -200,7 +200,6 @@ def processing_loop(
                     )
 
                 chosen, point_3d = triangulate_lmcs(lmcs)
-                assert point_3d is not None
 
                 chosen_cams.append(chosen)
                 points_3d.append(point_3d)
