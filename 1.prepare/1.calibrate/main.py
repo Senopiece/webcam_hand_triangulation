@@ -142,7 +142,7 @@ async def main():
     povs: List[PoV] = []
     for camera_conf in cameras_confs:
         idx = camera_conf["index"]
-        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(idx)
         if not cap.isOpened():
             print(f"Error: Could not open camera {idx}", file=sys.stderr)
             sys.exit(1)
