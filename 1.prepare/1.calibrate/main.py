@@ -228,7 +228,7 @@ async def main():
                 ret, frame = pov.cap.read()
 
                 if not ret:
-                    print(f"Error: Could not read from camera {idx}", out=sys.stderr)
+                    print(f"Error: Could not read from camera {idx}", file=sys.stderr)
                     sys.exit(1)
 
                 tasks.append(pov.processor.send(frame))
