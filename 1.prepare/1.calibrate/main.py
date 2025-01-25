@@ -231,7 +231,7 @@ async def main():
                     print(f"Error: Could not read from camera {idx}", file=sys.stderr)
                     sys.exit(1)
 
-                tasks.append(pov.processor.send(frame))
+                tasks.append(pov.processor.send(cv2.flip(frame, 1)))
 
             await asyncio.gather(*tasks)
 

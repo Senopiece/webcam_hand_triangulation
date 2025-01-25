@@ -42,8 +42,8 @@ def best_stereo_triangulate_lmcs(lmcs: List[ContextedLandmark]):
         mean_reprojection_error = 0
         for lmc in stereo_lmcs:
             # Reproject onto the camera without distortion
-            x1, y1 = project(point_3d, lmc.P)
-            x0, y0 = lmc.lm
+            x1, y1, z1 = project(point_3d, lmc.P)
+            x0, y0, z0 = lmc.lm
 
             # Compute the error
             reprojection_error = np.linalg.norm(np.array([x1, y1]) - np.array([x0, y0]))
