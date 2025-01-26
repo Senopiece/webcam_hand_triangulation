@@ -11,7 +11,6 @@ os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 import cv2
 
 import asyncio
-from os import path
 import sys
 import time
 from typing import List, Tuple
