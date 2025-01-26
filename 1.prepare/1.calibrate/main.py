@@ -58,21 +58,10 @@ async def main():
         help="Size of a square in millimeters",
     )
     parser.add_argument(
-        "-f",
-        "--force",
-        help="Force overwrite calibrations",
-        action="store_true",
-    )
-    parser.add_argument(
         "--window_size",
         type=str,
         default="448x336",
         help="Size of a preview window",
-    )
-    parser.add_argument(
-        "--use_existing_intrinsics",
-        help="Use existing intrinsics, don't overwrite them",
-        action="store_true",
     )
     parser.add_argument(
         "--pivot",
@@ -110,32 +99,6 @@ async def main():
     if len(set(conf["index"] for conf in cameras_confs)) < 2:
         print("Need at least two cameras.")
         sys.exit(1)
-    
-    # Merge with existing calibration inrrinsics
-    if args.use_existing_intrinsics:
-        with open(output_file_path, "r") as f:
-            cameras_calibs = json5.load(f)
-        
-        for conf in cameras_confs:
-            idx = conf["index"]
-            calib = next((calib for calib in cameras_calibs if calib["index"] == idx), None)
-            if calib is None:
-                continue
-            if calib["focus"] != conf["focus"]:
-                continue
-            if calib["size"] != conf["size"]:
-                continue
-            if calib["fps"] != conf["fps"]:
-                continue
-            conf["intrinsic"] = calib["intrinsic"]
-        
-        del cameras_calibs
-
-    # Notify if calibration already exists
-    if path.exists(output_file_path):
-        if not args.force:
-            print("Calibration output already exists. Use --force to overwrite.", file=sys.stderr)
-            sys.exit(1)
         
     # Initialize video captures
     print("\nInitalizing cameras...")
@@ -353,39 +316,27 @@ async def main():
 
         cam_calib = next(calib for calib in cameras_confs if calib["index"] == idx)
 
-        if args.use_existing_intrinsics and "intrinsic" in cam_calib:
-            print(f"Using existing intrinsic parameters for camera {idx}.")
-            # Reconstruct camera matrix and distortion coefficients
-            intrinsic_conf = cam_calib["intrinsic"]
-            fx = intrinsic_conf["focal_length_pixels"][0]
-            fy = intrinsic_conf["focal_length_pixels"][1]
-            s = intrinsic_conf["skew_coefficient"]
-            cx = intrinsic_conf["principal_point"][0]
-            cy = intrinsic_conf["principal_point"][1]
-            mtx = np.array([[fx, s, cx], [0, fy, cy], [0, 0, 1]])
-            dist_coeffs = np.array(intrinsic_conf["dist_coeffs"])
-        else:
-            print(f"Performing intrinsic calibration for camera {idx}...")
-            ret, mtx, dist_coeffs, _, _ = cv2.calibrateCamera(
-                [objp for _ in range(shots_count)],
-                pov.shots,
-                pov.frame.shape[1::-1],
-                None,
-                None,
-            )
-            dist_coeffs = dist_coeffs.flatten()
+        print(f"Performing intrinsic calibration for camera {idx}...")
+        ret, mtx, dist_coeffs, _, _ = cv2.calibrateCamera(
+            [objp for _ in range(shots_count)],
+            pov.shots,
+            pov.frame.shape[1::-1],
+            None,
+            None,
+        )
+        dist_coeffs = dist_coeffs.flatten()
 
-            # Extract intrinsic parameters
-            fx, fy = mtx[0, 0], mtx[1, 1]
-            s, cx, cy = mtx[0, 1], mtx[0, 2], mtx[1, 2]
+        # Extract intrinsic parameters
+        fx, fy = mtx[0, 0], mtx[1, 1]
+        s, cx, cy = mtx[0, 1], mtx[0, 2], mtx[1, 2]
 
-            # Store intrinsic parameters
-            cam_calib["intrinsic"] = {
-                "focal_length_pixels": [fx, fy],
-                "skew_coefficient": s,
-                "principal_point": [cx, cy],
-                "dist_coeffs": dist_coeffs.tolist(),
-            }
+        # Store intrinsic parameters
+        cam_calib["intrinsic"] = {
+            "focal_length_pixels": [fx, fy],
+            "skew_coefficient": s,
+            "principal_point": [cx, cy],
+            "dist_coeffs": dist_coeffs.tolist(),
+        }
 
         # Store intrinsic parameters for later use
         pov.mtx = mtx
