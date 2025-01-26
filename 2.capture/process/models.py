@@ -24,6 +24,7 @@ class CameraParams(BaseModel):
     focus: float
     fps: float
     size: List[float] = Field(..., min_items=2, max_items=2)
+    track: str
 
     class Config:
         arbitrary_types_allowed = True

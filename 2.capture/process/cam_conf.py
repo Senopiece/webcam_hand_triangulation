@@ -53,6 +53,7 @@ def load_cam_params(cam_decl):
         fps=cam_decl["fps"],
         size=size,
         P=P,
+        track=cam_decl["track"],
     )
 
 

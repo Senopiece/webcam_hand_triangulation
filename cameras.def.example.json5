@@ -2,25 +2,29 @@
     {
         index: 0,
         focus: 260,
-        size: "1280x960",
+        size: "1024x768",
         fps: 60,
+        track: "palm",
     },
     {
         index: 1,
         focus: 260,
-        size: "1280x960",
+        size: "1024x768",
         fps: 60,
+        track: "palm",
     },
     {
         index: 2,
         focus: 260,
-        size: "1280x960",
+        size: "1024x768",
         fps: 60,
+        track: "fingers",
     },
     {
         index: 3,
         focus: 260,
-        size: "1280x960",
+        size: "1024x768",
         fps: 60,
+        track: "fingers",
     },
 ]

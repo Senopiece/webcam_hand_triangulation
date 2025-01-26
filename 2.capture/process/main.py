@@ -20,6 +20,7 @@ from processing_loop import processing_loop
 from ordering_loop import ordering_loop
 from hand_3d_visualization_loop import hand_3d_visualization_loop
 from display_loop import display_loop
+from landmark_transforms import landmark_transforms
 
 
 def main(
@@ -78,6 +79,7 @@ def main(
         threading.Thread(
             target=processing_loop,
             args=(
+                [landmark_transforms[cp.track] for cp in cameras_params.values()],
                 draw_origin_landmarks,
                 desired_window_size,
                 list(cameras_params.values()),

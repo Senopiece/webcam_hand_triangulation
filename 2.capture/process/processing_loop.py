@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from typing import List, Tuple
+from typing import Any, Callable, List, Tuple
 import mediapipe as mp
 
 from models import CameraParams, ContextedLandmark
@@ -16,6 +16,7 @@ num_landmarks = 21  # MediaPipe Hands has 21 landmarks
 
 
 def processing_loop(
+        landmark_transforms: List[Callable[..., Any]],
         draw_origin_landmarks: bool,
         desired_window_size: Tuple[float, float],
         cameras_params: List[CameraParams],
@@ -46,36 +47,46 @@ def processing_loop(
         frames: List[np.ndarray] = [item[0] for item in frames]
 
         # Find landmarks
-        landmarks = []
-        for processor, frame in zip(processors, frames):
+        landmarks = [[] for _ in range(num_landmarks)] # lm = landmarks[lm_id][pov_id]
+        for landmark_transform, processor, frame in zip(landmark_transforms, processors, frames):
             # Convert to RGB and process
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             res = processor.process(frame_rgb)
 
-            # Convert MediaPipe landmarks to plain Python list
+            # Extract landmarks
+            pov_landmarks = [None for _ in range(num_landmarks)]
             if res.multi_hand_landmarks:
                 for hand_landmarks, handedness in zip(
                     res.multi_hand_landmarks, 
                     res.multi_handedness
                 ):
                     if handedness.classification[0].label == "Left":
-                        landmarks.append(hand_landmarks.landmark)
+                        pov_landmarks = landmark_transform(hand_landmarks.landmark)
                         break
-        
-        povs_with_landmarks = [i for i, landmarks in enumerate(landmarks) if landmarks is not None]
+            
+            # Store landmarks regrouping by landmark id first
+            assert len(pov_landmarks) == num_landmarks
+            for i, lm in enumerate(pov_landmarks):
+                landmarks[i].append(lm)
 
-        # Triangulate points across the cameras
-        chosen_cams = []
-        points_3d = []
-        if len(povs_with_landmarks) >= 2:
-            for lm_id in range(num_landmarks):
+        # Triangulate points across the cameras (if all landmarks are present at least on two cameras)
+        # so that the full triangulation is dropped if cannot triangulate a landmark
+        chosen_cams = [] # chosen_cams[lm_id]
+        points_3d = [] # points_3d[lm_id]
+        if all(
+            sum(
+                1 for lm in lm_povs if lm is not None
+            ) >= 2 for lm_povs in landmarks
+        ):
+            for lm_povs in landmarks:
                 lmcs = []
-                for pov_i in povs_with_landmarks:
-                    pov_params = cameras_params[pov_i]
+                for pov_i, (frame, pov_params, lm) in enumerate(zip(frames, cameras_params, lm_povs)):
+                    # Skip if lm is not present
+                    if lm is None:
+                        continue
 
                     # Landmark to pixel coord
-                    lm = landmarks[pov_i][lm_id]
-                    h, w, _ = frames[pov_i].shape
+                    h, w, _ = frame.shape
                     pixel_pt = [lm.x * w, lm.y * h]
 
                     # Undistort pixel coord
@@ -132,7 +143,7 @@ def processing_loop(
                     cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), radius=3, color=(0, 200, 200), thickness=-1)
         
         # Draw reprojected landmarks
-        if len(povs_with_landmarks) >= 2:
+        if points_3d:
             for pov_i, (frame, params) in enumerate(zip(frames, cameras_params)):
                 # Project 3D points onto each camera
                 reprojected_lms: List[Tuple[float, float]] = []
