@@ -32,7 +32,7 @@ def main(
     # Check camera parameters
     if len(cameras_params) < 2:
         print("Need at least two cameras with calibration data.")
-        sys.exit(1)
+        return
     
     cameras_ids = list(cameras_params.keys())
 

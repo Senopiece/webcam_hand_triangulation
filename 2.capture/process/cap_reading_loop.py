@@ -20,7 +20,7 @@ def cap_reading(
     cap = cv2.VideoCapture(idx)
     if not cap.isOpened():
         print(f"Error: Could not open camera {idx}", file=sys.stderr)
-        sys.exit(1)
+        return
     
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
 
@@ -42,7 +42,7 @@ def cap_reading(
             f"Camera {idx} does not support manual focus! (or invalid focus value)",
             file=sys.stderr,
         )
-        sys.exit(1)
+        return
 
     # FPS tracking variables
     fps_counter = FPSCounter()
