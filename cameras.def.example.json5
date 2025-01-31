@@ -1,3 +1,16 @@
+// Each element represents a camera:
+//   index - the camera id matching --cam argument of test script
+//   focus - camera focus in hardware specific units
+//   size - frame size in pixels to capture
+//   fps - the target fps the camera is supposed to capture frames at
+//   track: "full", "fingers", "palm", "back" - the mode at which hand captured by this camera will be used in trinagulation
+
+// NOTE: .def. is used by calibration script to generate .calib.
+//       capture script will use values only from .calib. file
+
+// NOTE: changing focus and size requires full recalibration
+//       but fps and track can be rewritten without recalibration (you can modify it directly in the .calib. file)
+
 [
     {
         index: 0,

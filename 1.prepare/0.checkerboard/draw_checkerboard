@@ -1,9 +1,0 @@
-#!/bin/bash
-set -e
-
-pattern --from_config radon_checkerboard.yaml
-
-magick radon_checkerboard.svg radon_checkerboard.pdf
-magick radon_checkerboard.svg -flip radon_checkerboard_flipped.pdf
-
-rm radon_checkerboard.svg
