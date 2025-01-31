@@ -108,6 +108,8 @@ async def main():
         if not cap.isOpened():
             print(f"Error: Could not open camera {idx}", file=sys.stderr)
             sys.exit(1)
+        
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
 
         # Set 60 fps
         size = list(map(int, camera_conf["size"].split("x")))

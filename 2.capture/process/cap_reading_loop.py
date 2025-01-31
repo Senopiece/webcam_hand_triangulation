@@ -21,6 +21,8 @@ def cap_reading(
     if not cap.isOpened():
         print(f"Error: Could not open camera {idx}", file=sys.stderr)
         sys.exit(1)
+    
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
 
     # Set resolution and fps
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, cam_param.size[0])
