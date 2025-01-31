@@ -28,6 +28,7 @@ The default pattern to use is already rendered onto a pdf: [radon_checkerboard.p
 [irl example](https://www.youtube.com/shorts/nwtn0VRGkjQ)
 
 ### 3. Capture hand
-Just run `python capture` from the repository root
+1. Install [capture/requirements.txt](capture/requirements.txt) into your venv or global python installation
+2. Run `python capture` from the repository root
 
 [irl example](https://youtube.com/shorts/QCHkzZVtM5I)
