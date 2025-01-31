@@ -8,7 +8,6 @@ import threading
 import numpy as np
 from typing import Dict, List, Tuple
 import argparse
-import sys
 
 from cam_conf import load_cameras_parameters
 from wrapped import Wrapped
@@ -25,6 +24,7 @@ from landmark_transforms import landmark_transforms
 
 def main(
         cameras_params: Dict[int, CameraParams],
+        couple_fps: int,
         desired_window_size: Tuple[float, float],
         division: int,
         draw_origin_landmarks: bool
@@ -64,6 +64,7 @@ def main(
     coupling_worker = threading.Thread(
         target=coupling_loop,
         args=(
+            couple_fps,
             cams_stop_event,
             last_frame,
             coupled_frames_queue,
@@ -118,13 +119,13 @@ def main(
     hand_3d_visualizer.start()
 
     # Sort processing workers output
-    ordered_processed_queues = [ThreadFinalizableQueue() for _ in cameras_ids]
+    ordered_processed_queues = [ProcessFinalizableQueue() for _ in cameras_ids]
     display_ordering_loops = [
         threading.Thread(
             target=ordering_loop,
             args=(
                 in_queue,
-                out_queue
+                out_queue,
             ),
             daemon=True,
         ) for in_queue, out_queue in zip(processed_queues, ordered_processed_queues)
@@ -134,12 +135,12 @@ def main(
     
     # Displaying loops
     display_loops = [
-        threading.Thread(
+        multiprocessing.Process(
             target=display_loop,
             args=(
                 idx,
                 cams_stop_event,
-                frame_queue
+                frame_queue,
             ),
             daemon=True,
         ) for idx, frame_queue in zip(cameras_ids, ordered_processed_queues)
@@ -201,6 +202,12 @@ if __name__ == "__main__":
         help="Number of the hand tracking worker pool per camera",
     )
     parser.add_argument(
+        "--couple_fps",
+        type=int,
+        default=30,
+        help="Rate at which frames from cameras will be coupled",
+    )
+    parser.add_argument(
         "-ol",
         "--origin_landmarks",
         help="Draw origin landmarks",
@@ -209,6 +216,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     main(
         cameras_params=load_cameras_parameters(args.cfile),
+        couple_fps=args.couple_fps,
         desired_window_size=tuple(map(int, args.window_size.split("x"))),
         division=args.division,
         draw_origin_landmarks=args.origin_landmarks,

@@ -11,11 +11,12 @@ from fps_counter import FPSCounter
 from finalizable_queue import FinalizableQueue
 
 def coupling_loop(
+        couple_fps: int,
         stop_event: multiprocessing.synchronize.Event,
         last_frame: List[Wrapped[Tuple[np.ndarray, int] | None]],
         coupled_frames_queue: FinalizableQueue,
     ):
-    target_frame_interval = 1 / 30.0  # ~30 FPS
+    target_frame_interval = 1 / couple_fps
 
     # Wait until at least one frame is available from all cameras
     while True:
@@ -43,7 +44,7 @@ def coupling_loop(
         coupled_frames_queue.put((index, frames, fps_counter.get_fps()))
         index += 1
 
-        # Rate-limit to ~60 FPS
+        # Rate-limit to ~couple_fps FPS
         elapsed_time = time.time() - start_time
         sleep_time = max(0, target_frame_interval - elapsed_time)
         time.sleep(sleep_time)
