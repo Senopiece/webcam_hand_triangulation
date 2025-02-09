@@ -1,12 +1,11 @@
 import argparse
 import os
 import sys
+
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 import cv2
 
-parser = argparse.ArgumentParser(
-    description="Test a camera"
-)
+parser = argparse.ArgumentParser(description="Test a camera")
 parser.add_argument(
     "--cam",
     type=int,
@@ -46,10 +45,10 @@ while True:
     if not ret:
         print("Can't receive frame (stream end?). Exiting ...")
         break
-    
+
     # Display the resulting frame
-    cv2.imshow('frame', frame)
-    if cv2.waitKey(1) == ord('q'):
+    cv2.imshow("frame", frame)
+    if cv2.waitKey(1) == ord("q"):
         break
 
 # When everything done, release the capture
