@@ -11,14 +11,14 @@ from fps_counter import FPSCounter
 from draw_utils import draw_left_top, draw_right_bottom
 
 
-mp_hands = mp.solutions.hands
+mp_hands = mp.solutions.hands  # type: ignore
 
 
 def hand_3d_visualization_loop(
-        window_size: Tuple[float, float],
-        stop_event: multiprocessing.synchronize.Event,
-        hand_points_queue: FinalizableQueue,
-    ):
+    window_size: Tuple[int, int],
+    stop_event: multiprocessing.synchronize.Event,
+    hand_points_queue: FinalizableQueue,
+):
     window_title = "3D visualization"
     cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
 
@@ -44,7 +44,9 @@ def hand_3d_visualization_loop(
     camera_fov = 60  # Field of view in degrees
     camera_near = 0.1  # Near clipping plane
     camera_far = 100.0  # Far clipping plane
-    camera_distance_to_target = 300  # Distance from the camera to the target to maintain
+    camera_distance_to_target = (
+        300  # Distance from the camera to the target to maintain
+    )
     camera_roll = 0
     camera_spherical_position = [0, 0]  # [azimuth, elevation] in radians
 
@@ -52,7 +54,9 @@ def hand_3d_visualization_loop(
         nonlocal camera_spherical_position
         camera_spherical_position[0] += delta[0]
         camera_spherical_position[1] += delta[1]
-        camera_spherical_position[1] = np.clip(camera_spherical_position[1], -1.1, 1.1)  # Limit pitch
+        camera_spherical_position[1] = np.clip(
+            camera_spherical_position[1], -1.1, 1.1
+        )  # Limit pitch
 
     def handle_mouse_event(event, x, y, flags, param):
         nonlocal grabbed, last_pos, inertia, inertia_tracked_last_pos, camera_distance_to_target, camera_spherical_position
@@ -68,9 +72,15 @@ def hand_3d_visualization_loop(
 
         elif event == cv2.EVENT_MOUSEWHEEL:
             if flags > 0:
-                camera_distance_to_target = max(min_camera_distance_to_target, camera_distance_to_target - camera_distance_delta)  # Decrease distance (zoom in)
+                camera_distance_to_target = max(
+                    min_camera_distance_to_target,
+                    camera_distance_to_target - camera_distance_delta,
+                )  # Decrease distance (zoom in)
             else:
-                camera_distance_to_target = min(max_camera_distance_to_target, camera_distance_to_target + camera_distance_delta)  # Increase distance (zoom out)
+                camera_distance_to_target = min(
+                    max_camera_distance_to_target,
+                    camera_distance_to_target + camera_distance_delta,
+                )  # Increase distance (zoom out)
 
         elif event == cv2.EVENT_MOUSEMOVE:
             if last_pos is not None:
@@ -80,14 +90,17 @@ def hand_3d_visualization_loop(
 
             if grabbed:
                 update_camera_spherical_position(delta)
-            
+
             last_pos = (x, y)
-    
+
     cv2.setMouseCallback(window_title, handle_mouse_event)
 
     while True:
         try:
-            hand_points, coupling_fps, debt_size = hand_points_queue.get()
+            result = hand_points_queue.get()
+            if result is None:
+                continue
+            hand_points, coupling_fps, debt_size = result
         except EmptyFinalized:
             break
 
@@ -100,12 +113,17 @@ def hand_3d_visualization_loop(
             if last_pos is None:
                 inertia = (0, 0)
             elif inertia_tracked_last_pos is not None:
-                delta = (last_pos[0] - inertia_tracked_last_pos[0]) * sensetivity, (last_pos[1] - inertia_tracked_last_pos[1]) * sensetivity
+                delta = (last_pos[0] - inertia_tracked_last_pos[0]) * sensetivity, (
+                    last_pos[1] - inertia_tracked_last_pos[1]
+                ) * sensetivity
                 inertia = delta
             inertia_tracked_last_pos = last_pos
         else:
             # Release inertia
-            inertia = inertia[0] * intertia_absorbtion_k, inertia[1] * intertia_absorbtion_k
+            inertia = (
+                inertia[0] * intertia_absorbtion_k,
+                inertia[1] * intertia_absorbtion_k,
+            )
             update_camera_spherical_position(inertia)
 
         # calculate projection matrix
@@ -123,7 +141,7 @@ def hand_3d_visualization_loop(
 
         # Project points
         landmarks = [project(point_3d, P) for point_3d in hand_points]
-        
+
         if len(landmarks) != 0:
             # Draw hand connections
             for connection in mp_hands.HAND_CONNECTIONS:
@@ -156,7 +174,7 @@ def hand_3d_visualization_loop(
                     (int(lm[0]), int(lm[1])),
                     radius=3,
                     color=(0, 255, 0),
-                    thickness=-1
+                    thickness=-1,
                 )
 
         # Draw camera target with axis lines
@@ -174,9 +192,9 @@ def hand_3d_visualization_loop(
                     (int(camera_target_proj[0]), int(camera_target_proj[1])),
                     (int(axis_end[0]), int(axis_end[1])),
                     color=np.eye(3)[-axis_i - 1] * 255,
-                    thickness=1
+                    thickness=1,
                 )
-        
+
         # Draw coupling fps
         draw_right_bottom(1, f"Couple FPS: {coupling_fps}", frame)
         draw_right_bottom(0, f"Debt: {debt_size}", frame)
@@ -187,7 +205,7 @@ def hand_3d_visualization_loop(
 
         # Update the frame
         cv2.imshow(window_title, frame)
-        
+
         # Maybe stop
         key = cv2.waitKey(1)
         if key & 0xFF == ord("q"):
@@ -195,5 +213,5 @@ def hand_3d_visualization_loop(
             stop_event.set()
 
         hand_points_queue.task_done()
-    
+
     print("3D visualization loop finished.")

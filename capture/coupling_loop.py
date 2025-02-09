@@ -10,12 +10,13 @@ from wrapped import Wrapped
 from fps_counter import FPSCounter
 from finalizable_queue import FinalizableQueue
 
+
 def coupling_loop(
-        couple_fps: int,
-        stop_event: multiprocessing.synchronize.Event,
-        last_frame: List[Wrapped[Tuple[np.ndarray, int] | None]],
-        coupled_frames_queue: FinalizableQueue,
-    ):
+    couple_fps: int,
+    stop_event: multiprocessing.synchronize.Event,
+    last_frame: List[Wrapped[Tuple[np.ndarray, int] | None]],
+    coupled_frames_queue: FinalizableQueue,
+):
     target_frame_interval = 1 / couple_fps
 
     # Wait until at least one frame is available from all cameras
@@ -37,7 +38,9 @@ def coupling_loop(
 
         frames = []
         for frame in last_frame:
-            frame, fps = frame.get()
+            v = frame.get()
+            assert v is not None
+            frame, fps = v
             frames.append((cv2.flip(frame, 1), fps))
 
         # Send coupled frames
@@ -48,6 +51,6 @@ def coupling_loop(
         elapsed_time = time.time() - start_time
         sleep_time = max(0, target_frame_interval - elapsed_time)
         time.sleep(sleep_time)
-    
+
     coupled_frames_queue.finalize()
     print("Coupling loop finished.")

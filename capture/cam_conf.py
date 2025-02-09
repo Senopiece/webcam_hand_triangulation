@@ -32,11 +32,15 @@ def load_cam_params(cam_decl):
 
     T = np.array([extrinsic["translation_mm"]], dtype=np.float64).T
     if T.shape != (3, 1):
-        raise ValueError(f"Invalid translation_mm shape for camera {idx}, expected 3x1.")
+        raise ValueError(
+            f"Invalid translation_mm shape for camera {idx}, expected 3x1."
+        )
 
     rvec = np.array([extrinsic["rotation_rodrigues"]], dtype=np.float64).T
     if rvec.shape != (3, 1):
-        raise ValueError(f"Invalid rotation_rodrigues shape for camera {idx}, expected 1x3.")
+        raise ValueError(
+            f"Invalid rotation_rodrigues shape for camera {idx}, expected 1x3."
+        )
 
     R, _ = cv2.Rodrigues(rvec)
 
@@ -45,7 +49,8 @@ def load_cam_params(cam_decl):
     P = intrinsic_mtx @ RT  # Projection matrix
 
     # Return parameters
-    size = list(map(int, cam_decl["size"].split("x")))
+    size = tuple(map(int, cam_decl["size"].split("x")))
+    assert len(size) == 2
     return idx, CameraParams(
         intrinsic=IntrinsicCameraParams(mtx=intrinsic_mtx, dist_coeffs=dist_coeffs),
         extrinsic=ExtrinsicCameraParams(rvec=rvec, T=T, R=R),

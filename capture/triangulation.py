@@ -37,13 +37,15 @@ def best_stereo_triangulate_lmcs(lmcs: List[ContextedLandmark]):
         lmcs,
         2,
     ):
-        point_3d = stereo_triangulate_lmcs(stereo_lmcs[0].P, stereo_lmcs[1].P, stereo_lmcs[0].lm, stereo_lmcs[1].lm)
+        point_3d = stereo_triangulate_lmcs(
+            stereo_lmcs[0].P, stereo_lmcs[1].P, stereo_lmcs[0].lm, stereo_lmcs[1].lm
+        )
 
         mean_reprojection_error = 0
         for lmc in stereo_lmcs:
             # Reproject onto the camera without distortion
-            x1, y1, z1 = project(point_3d, lmc.P)
-            x0, y0, z0 = lmc.lm
+            (x1, y1), z1 = project(point_3d, lmc.P)
+            x0, y0 = lmc.lm
 
             # Compute the error
             reprojection_error = np.linalg.norm(np.array([x1, y1]) - np.array([x0, y0]))
@@ -58,6 +60,7 @@ def best_stereo_triangulate_lmcs(lmcs: List[ContextedLandmark]):
             best_lmcs = stereo_lmcs
 
     return [lmc.cam_idx for lmc in best_lmcs], best_point
+
 
 def triangulate_lmcs(lmcs: List[ContextedLandmark]):
     """
@@ -83,4 +86,3 @@ def triangulate_lmcs(lmcs: List[ContextedLandmark]):
         return [lmc.cam_idx for lmc in lmcs], X[:3]
     else:
         return [], None
-

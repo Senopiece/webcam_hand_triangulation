@@ -3,9 +3,9 @@ from finalizable_queue import EmptyFinalized, FinalizableQueue
 
 
 def ordering_loop(
-        in_queue: FinalizableQueue,
-        out_queue: FinalizableQueue,
-    ):
+    in_queue: FinalizableQueue,
+    out_queue: FinalizableQueue,
+):
     expecting = 0
     unordered: Dict[int, Any] = {}
     while True:
@@ -29,8 +29,8 @@ def ordering_loop(
                     out_queue.put(data)
         else:
             unordered[index] = data
-        
+
         in_queue.task_done()
-    
+
     out_queue.finalize()
     print("A ordering loop finished.")

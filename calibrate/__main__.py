@@ -24,6 +24,7 @@ from async_cb import AsyncCBThreadedSolution, CBProcessingPool
 # TODO: to get rid of separate .def and .calib and write the calibration back to the original file, manage somehow to keep the original formatting and comments
 # TODO: rewrite to threads to be in style sync with the capture/process
 
+
 async def main():
     # Set up argument parser to accept various parameters
     parser = argparse.ArgumentParser(description="Camera Calibration Script")
@@ -84,7 +85,9 @@ async def main():
 
     # Parse chessboard size argument
     try:
-        chessboard_cols, chessboard_rows = map(int, args.chessboard_size.lower().split("x"))
+        chessboard_cols, chessboard_rows = map(
+            int, args.chessboard_size.lower().split("x")
+        )
         chessboard_size = (chessboard_cols, chessboard_rows)
     except ValueError:
         print("Error: Invalid chessboard_size format. Use 'colsxrows', e.g., '9x6'.")
@@ -95,11 +98,11 @@ async def main():
     # Load camera configurations from the JSON file
     with open(input_file_path, "r") as f:
         cameras_confs = json5.load(f)
-    
+
     if len(set(conf["index"] for conf in cameras_confs)) < 2:
         print("Need at least two cameras.")
         sys.exit(1)
-        
+
     # Initialize video captures
     print("\nInitalizing cameras...")
     povs: List[PoV] = []
@@ -109,8 +112,8 @@ async def main():
         if not cap.isOpened():
             print(f"Error: Could not open camera {idx}", file=sys.stderr)
             sys.exit(1)
-        
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc("M", "J", "P", "G"))  # type: ignore
 
         # Set 60 fps
         size = list(map(int, camera_conf["size"].split("x")))
@@ -122,7 +125,7 @@ async def main():
         autofocus_supported = cap.get(cv2.CAP_PROP_AUTOFOCUS) != -1
         if autofocus_supported:
             cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
-        
+
         # Set manual focus value
         focus_value = camera_conf["focus"]
         focus_supported = cap.set(cv2.CAP_PROP_FOCUS, focus_value)
@@ -132,18 +135,23 @@ async def main():
                 file=sys.stderr,
             )
             sys.exit(1)
-        
+
         # Make window for the pov
         cv2.namedWindow(f"Camera_{idx}", cv2.WINDOW_AUTOSIZE)
 
         # Initialize camera data
-        povs.append(PoV(
-            cam_id=idx,
-            cap=cap,
-            processor=CBProcessingPool(
-                [AsyncCBThreadedSolution(chessboard_size) for _ in range(args.division)],
-            ),
-        ))
+        povs.append(
+            PoV(
+                cam_id=idx,
+                cap=cap,
+                processor=CBProcessingPool(
+                    [
+                        AsyncCBThreadedSolution(chessboard_size)
+                        for _ in range(args.division)
+                    ],
+                ),
+            )
+        )
 
         print(f"Camera {idx} setup complete")
 
@@ -206,9 +214,7 @@ async def main():
 
             elif key & 0xFF == ord("c"):
                 # Verify shot
-                missing_cameras = [
-                    pov.cam_id for pov in povs if pov.corners is None
-                ]
+                missing_cameras = [pov.cam_id for pov in povs if pov.corners is None]
                 if missing_cameras:
                     print("Not all cameras have detected the pattern.")
                     print(f"+- Cameras missing pattern: {sorted(missing_cameras)}")
@@ -233,7 +239,7 @@ async def main():
 
                 print("\nProceeding to calibration...")
                 break
-    
+
     run = True
 
     async def consuming_loop():
@@ -241,7 +247,7 @@ async def main():
         fps_counter = 0
         fps = 0
         fps_display_time = time.time()
-        
+
         # Loop untill said to stop but make sure to process what remains
         while (
             run
@@ -256,7 +262,7 @@ async def main():
             results: List[Tuple[np.ndarray, cv2.typing.MatLike]] = await asyncio.gather(
                 *[pov.processor.results.get() for pov in povs]
             )
-            
+
             # Display and detect corners
             for pov, (res, frame) in zip(povs, results):
                 idx = pov.cam_id
@@ -281,7 +287,7 @@ async def main():
 
                 # Display the resized frame
                 cv2.imshow(f"Camera_{idx}", resized_frame)
-            
+
             # FPS counter update every second
             fps_counter += 1
             current_time = time.time()
@@ -289,7 +295,7 @@ async def main():
                 fps_display_time = current_time
                 fps = fps_counter
                 fps_counter = 0
-    
+
     # Run loops: consume asyncronusly and join with feeding
     consuming_task = asyncio.create_task(consuming_loop())
     await feeding_loop()
@@ -309,7 +315,9 @@ async def main():
 
     # Prepare object points based on the real-world dimensions of the calibration pattern
     objp = np.zeros((chessboard_size[1] * chessboard_size[0], 3), np.float32)
-    objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(-1, 2)
+    objp[:, :2] = np.mgrid[0 : chessboard_size[0], 0 : chessboard_size[1]].T.reshape(
+        -1, 2
+    )
     objp *= square_size
 
     # Perform intrinsic calibrations
@@ -319,12 +327,13 @@ async def main():
         cam_calib = next(calib for calib in cameras_confs if calib["index"] == idx)
 
         print(f"Performing intrinsic calibration for camera {idx}...")
+        assert pov.frame is not None
         ret, mtx, dist_coeffs, _, _ = cv2.calibrateCamera(
             [objp for _ in range(shots_count)],
             pov.shots,
             pov.frame.shape[1::-1],
-            None,
-            None,
+            np.zeros((3, 3)),
+            np.zeros((5, 1)),
         )
         dist_coeffs = dist_coeffs.flatten()
 
@@ -347,7 +356,9 @@ async def main():
     print("\nComputing transformations relative to the pivot camera...")
 
     # Pivot camera extrinsic is identity
-    pivot_cam_calib = next(calib for calib in cameras_confs if calib["index"] == reference_idx)
+    pivot_cam_calib = next(
+        calib for calib in cameras_confs if calib["index"] == reference_idx
+    )
     pivot_cam_calib["extrinsic"] = {
         "translation_mm": [0, 0, 0],
         "rotation_rodrigues": [0, 0, 0],
@@ -368,6 +379,7 @@ async def main():
     mtx1 = ref_pov.mtx
     dist1 = ref_pov.dist_coeffs
 
+    assert ref_pov.frame is not None
     image_size = ref_pov.frame.shape[1::-1]
 
     # Compute transformations for each camera relative to the pivot
@@ -383,6 +395,8 @@ async def main():
         dist2 = pov.dist_coeffs
 
         # Stereo calibration
+        assert not (mtx1 is None or dist1 is None or mtx2 is None or dist2 is None)
+
         ret, _, _, _, _, R, T, E, F = cv2.stereoCalibrate(
             objpoints,
             imgpoints1,
@@ -413,6 +427,7 @@ async def main():
     with open(output_file_path, "w") as f:
         json5.dump(cameras_confs, f, indent=4)
     print("\nCalibration file is written with intrinsic and extrinsic parameters.")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

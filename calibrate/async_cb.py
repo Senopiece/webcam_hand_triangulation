@@ -23,12 +23,13 @@ class AsyncCB(ABC):
         pass
 
     @abstractmethod
-    def is_busy(self):
+    def is_busy(self) -> bool:
         pass
 
     @abstractmethod
     async def wait_free(self):
         pass
+
 
 class _ThreadedAsyncCB(AsyncCB):
     def __init__(self, send):
@@ -86,6 +87,7 @@ class _ThreadedAsyncCB(AsyncCB):
         await self.out_data_event.wait()
         return self.res
 
+
 class AsyncCBThreadedSolution(_ThreadedAsyncCB):
     def __init__(self, chessboard_size):
         def send(frame):
@@ -115,6 +117,7 @@ class AsyncCBThreadedSolution(_ThreadedAsyncCB):
                 return (None, frame)
 
         super().__init__(send)
+
 
 class CBProcessingPool:
     def __init__(self, pool: List[AsyncCB]):

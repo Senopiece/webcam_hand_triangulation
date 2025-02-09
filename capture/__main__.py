@@ -1,4 +1,6 @@
 import os
+import sys
+
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 import cv2
 
@@ -23,24 +25,23 @@ from landmark_transforms import landmark_transforms
 
 
 def main(
-        cameras_params: Dict[int, CameraParams],
-        couple_fps: int,
-        desired_window_size: Tuple[float, float],
-        division: int,
-        draw_origin_landmarks: bool
-    ):
+    cameras_params: Dict[int, CameraParams],
+    couple_fps: int,
+    desired_window_size: Tuple[int, int],
+    division: int,
+    draw_origin_landmarks: bool,
+):
     # Check camera parameters
     if len(cameras_params) < 2:
         print("Need at least two cameras with calibration data.")
         return
-    
+
     cameras_ids = list(cameras_params.keys())
 
     # Shared
     cams_stop_event = multiprocessing.Event()
     last_frame: List[Wrapped[Tuple[np.ndarray, int] | None]] = [
-        Wrapped()
-        for _ in cameras_ids
+        Wrapped() for _ in cameras_ids
     ]
 
     # Capture cameras
@@ -54,11 +55,12 @@ def main(
                 cam_param,
             ),
             daemon=True,
-        ) for my_last_frame, (idx, cam_param) in zip(last_frame, cameras_params.items())
+        )
+        for my_last_frame, (idx, cam_param) in zip(last_frame, cameras_params.items())
     ]
     for process in caps:
         process.start()
-    
+
     # Couple frames
     coupled_frames_queue = ThreadFinalizableQueue()
     coupling_worker = threading.Thread(
@@ -72,7 +74,7 @@ def main(
         daemon=True,
     )
     coupling_worker.start()
-    
+
     # Processing workers
     hand_points_queue = ThreadFinalizableQueue()
     processed_queues = [ThreadFinalizableQueue() for _ in cameras_ids]
@@ -89,11 +91,12 @@ def main(
                 processed_queues,
             ),
             daemon=True,
-        ) for _ in range(division)
+        )
+        for _ in range(division)
     ]
     for process in processing_loops_pool:
         process.start()
-    
+
     # Sort hand points
     ordered_hand_points_queue = ProcessFinalizableQueue()
     hand_points_sorter = threading.Thread(
@@ -128,11 +131,12 @@ def main(
                 out_queue,
             ),
             daemon=True,
-        ) for in_queue, out_queue in zip(processed_queues, ordered_processed_queues)
+        )
+        for in_queue, out_queue in zip(processed_queues, ordered_processed_queues)
     ]
     for process in display_ordering_loops:
         process.start()
-    
+
     # Displaying loops
     display_loops = [
         multiprocessing.Process(
@@ -143,7 +147,8 @@ def main(
                 frame_queue,
             ),
             daemon=True,
-        ) for idx, frame_queue in zip(cameras_ids, ordered_processed_queues)
+        )
+        for idx, frame_queue in zip(cameras_ids, ordered_processed_queues)
     ]
     for process in display_loops:
         process.start()
@@ -154,10 +159,10 @@ def main(
     # Free resources
     print("Freeing resources...")
     coupling_worker.join()
-    
+
     for worker in caps:
         worker.join()
-    
+
     print("Waiting for lag to process...")
     coupling_worker.join()
 
@@ -167,7 +172,7 @@ def main(
     hand_points_queue.finalize()
     for queue in processed_queues:
         queue.finalize()
-    
+
     hand_points_sorter.join()
     for worker in display_ordering_loops:
         worker.join()
@@ -208,16 +213,19 @@ if __name__ == "__main__":
         help="Rate at which frames from cameras will be coupled",
     )
     parser.add_argument(
-        "-ol",
-        "--origin_landmarks",
-        help="Draw origin landmarks",
-        action="store_true"
+        "-ol", "--origin_landmarks", help="Draw origin landmarks", action="store_true"
     )
     args = parser.parse_args()
+
+    desired_window_size = tuple(map(int, args.window_size.split("x")))
+    if len(desired_window_size) != 2:
+        print("Error: window_size must be a AxB value", file=sys.stderr)
+        sys.exit(1)
+
     main(
         cameras_params=load_cameras_parameters(args.cfile),
         couple_fps=args.couple_fps,
-        desired_window_size=tuple(map(int, args.window_size.split("x"))),
+        desired_window_size=desired_window_size,
         division=args.division,
         draw_origin_landmarks=args.origin_landmarks,
     )

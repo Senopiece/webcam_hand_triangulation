@@ -1,6 +1,7 @@
-from typing import List
+from typing import Tuple
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
 
 class IntrinsicCameraParams(BaseModel):
     mtx: np.ndarray
@@ -8,6 +9,7 @@ class IntrinsicCameraParams(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+
 
 class ExtrinsicCameraParams(BaseModel):
     rvec: np.ndarray
@@ -17,22 +19,24 @@ class ExtrinsicCameraParams(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
+
 class CameraParams(BaseModel):
     intrinsic: IntrinsicCameraParams
     extrinsic: ExtrinsicCameraParams
     P: np.ndarray
     focus: float
     fps: float
-    size: List[float] = Field(..., min_items=2, max_items=2)
+    size: Tuple[int, int]
     track: str
 
     class Config:
         arbitrary_types_allowed = True
 
+
 class ContextedLandmark(BaseModel):
     cam_idx: int
     P: np.ndarray
-    lm: np.ndarray # undistorted pixel coords
+    lm: np.ndarray  # undistorted pixel coords
 
     class Config:
         arbitrary_types_allowed = True

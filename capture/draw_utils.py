@@ -7,6 +7,7 @@ color = (255, 255, 255)  # Main text color
 thickness = 1
 background_color = (0, 0, 0)  # Black rectangle color
 
+
 def draw_left_top(y: int, text: str, frame: np.ndarray):
     text_size, _ = cv2.getTextSize(text, font, font_scale, thickness)
     text_x = 10  # Padding from the left
@@ -23,6 +24,7 @@ def draw_left_top(y: int, text: str, frame: np.ndarray):
 
     # Draw the text
     cv2.putText(frame, text, (text_x, text_y), font, font_scale, color, thickness)
+
 
 def draw_right_bottom(y: int, text: str, frame: np.ndarray):
     text_size, _ = cv2.getTextSize(text, font, font_scale, thickness)

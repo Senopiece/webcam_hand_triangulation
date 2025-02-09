@@ -11,18 +11,18 @@ from models import CameraParams
 
 
 def cap_reading(
-        idx: int,
-        stop_event: multiprocessing.synchronize.Event,
-        my_last_frame: Wrapped[Tuple[np.ndarray, int] | None],
-        cam_param: CameraParams,
-    ):
+    idx: int,
+    stop_event: multiprocessing.synchronize.Event,
+    my_last_frame: Wrapped[Tuple[np.ndarray, int] | None],
+    cam_param: CameraParams,
+):
     # Initialize video capture
     cap = cv2.VideoCapture(idx)
     if not cap.isOpened():
         print(f"Error: Could not open camera {idx}", file=sys.stderr)
         return
-    
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc("M", "J", "P", "G"))  # type: ignore
 
     # Set resolution and fps
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, cam_param.size[0])

@@ -21,7 +21,7 @@ def distorted_project(point3d, rvec, T, intrinsic_mtx, dist_coeffs):
 def project(point3d, P):
     """
     Project a 3D point into 2D pixel coordinates and include the normalized z-value.
-    
+
     Parameters:
         point3d (np.array): The 3D point [X, Y, Z].
         P (np.array): The 4x4 projection matrix.
@@ -47,7 +47,8 @@ def project(point3d, P):
 
 
 def compute_sphere_rotating_camera_projection_matrix(
-        fov, near, far, spherical_pos, roll, distance, target, frame_width, frame_height):
+    fov, near, far, spherical_pos, roll, distance, target, frame_width, frame_height
+):
     """
     Computes the camera projection matrix for a spherical rotating camera.
     Fixes scaling when target is not (0, 0, 0) and applies roll while maintaining focus on the target.
@@ -55,12 +56,14 @@ def compute_sphere_rotating_camera_projection_matrix(
     # Aspect ratio and perspective projection matrix
     aspect_ratio = frame_width / frame_height
     f = 1 / np.tan(fov / 2)  # Focal length
-    proj = np.array([
-        [f / aspect_ratio, 0, 0, 0],
-        [0, f, 0, 0],
-        [0, 0, (far + near) / (near - far), (2 * far * near) / (near - far)],
-        [0, 0, -1, 0]
-    ])
+    proj = np.array(
+        [
+            [f / aspect_ratio, 0, 0, 0],
+            [0, f, 0, 0],
+            [0, 0, (far + near) / (near - far), (2 * far * near) / (near - far)],
+            [0, 0, -1, 0],
+        ]
+    )
 
     # Spherical to Cartesian conversion
     azimuth, elevation = spherical_pos
@@ -70,7 +73,7 @@ def compute_sphere_rotating_camera_projection_matrix(
     camera_position = np.array([cx, cy, cz]) + target  # Offset by target
 
     # Camera forward, right, and up vectors
-    forward = (target - camera_position)
+    forward = target - camera_position
     forward /= np.linalg.norm(forward)  # Normalize forward vector
 
     world_up = np.array([0, 0, 1])  # World up vector
@@ -87,9 +90,11 @@ def compute_sphere_rotating_camera_projection_matrix(
 
     # Rodrigues' rotation formula to rotate `right` and `up` around `forward`
     def rotate_vector_around_axis(vector, axis, angle):
-        return (vector * cos_roll +
-                np.cross(axis, vector) * sin_roll +
-                axis * np.dot(axis, vector) * (1 - cos_roll))
+        return (
+            vector * cos_roll
+            + np.cross(axis, vector) * sin_roll
+            + axis * np.dot(axis, vector) * (1 - cos_roll)
+        )
 
     right = rotate_vector_around_axis(right, forward_axis, roll)
     up = rotate_vector_around_axis(up, forward_axis, roll)
@@ -97,20 +102,20 @@ def compute_sphere_rotating_camera_projection_matrix(
     # View matrix construction
     view = np.eye(4)
     view[:3, :3] = np.vstack([right, up, -forward])  # Orientation matrix
-    view[:3, 3] = -view[:3, :3] @ camera_position    # Translation
+    view[:3, 3] = -view[:3, :3] @ camera_position  # Translation
 
     # Combine projection and view matrices
     proj_view = proj @ view
 
     # Screen space transformation
-    screen_transform = np.array([
-        [frame_width / 2, 0, 0, frame_width / 2],
-        [0, -frame_height / 2, 0, frame_height / 2],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1]
-    ])
+    screen_transform = np.array(
+        [
+            [frame_width / 2, 0, 0, frame_width / 2],
+            [0, -frame_height / 2, 0, frame_height / 2],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+        ]
+    )
 
     # Final matrix: screen_transform * proj_view
     return screen_transform @ proj_view
-
-

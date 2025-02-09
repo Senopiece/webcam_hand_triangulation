@@ -24,7 +24,9 @@ def _back(landmarks):
         return [None for _ in landmarks]
 
     # Extract palm landmarks (polygon vertices)
-    palm_lms = np.array([[lm.x, lm.y] for i, lm in enumerate(landmarks) if i not in _fingers_ids])
+    palm_lms = np.array(
+        [[lm.x, lm.y] for i, lm in enumerate(landmarks) if i not in _fingers_ids]
+    )
 
     SMOOTHING_DISTANCE = 0.06
     updated_landmarks = landmarks[:]
@@ -36,7 +38,9 @@ def _back(landmarks):
             continue
 
         # Check if the landmark is in the smoothed polygon - e.g. covered by palm
-        if is_point_in_smoothed_polygon(np.array([lm.x, lm.y]), palm_lms, SMOOTHING_DISTANCE):
+        if is_point_in_smoothed_polygon(
+            np.array([lm.x, lm.y]), palm_lms, SMOOTHING_DISTANCE
+        ):
             updated_landmarks[i] = None
 
     return updated_landmarks
