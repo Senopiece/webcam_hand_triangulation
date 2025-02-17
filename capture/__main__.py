@@ -28,7 +28,7 @@ def main(
     cameras_params: Dict[int, CameraParams],
     couple_fps: int,
     desired_window_size: Tuple[int, int],
-    division: int,
+    workers: int,
     draw_origin_landmarks: bool,
 ):
     # Check camera parameters
@@ -92,7 +92,7 @@ def main(
             ),
             daemon=True,
         )
-        for _ in range(division)
+        for _ in range(workers)
     ]
     for process in processing_loops_pool:
         process.start()
@@ -201,10 +201,10 @@ if __name__ == "__main__":
         help="Size of a preview window",
     )
     parser.add_argument(
-        "--division",
+        "--workers",
         type=int,
         default=8,
-        help="Number of the hand tracking worker pool per camera",
+        help="Size of processing workers pool",
     )
     parser.add_argument(
         "--couple_fps",
@@ -226,6 +226,6 @@ if __name__ == "__main__":
         cameras_params=load_cameras_parameters(args.cfile),
         couple_fps=args.couple_fps,
         desired_window_size=desired_window_size,
-        division=args.division,
+        workers=args.workers,
         draw_origin_landmarks=args.origin_landmarks,
     )
