@@ -6,9 +6,9 @@ import cv2
 import numpy as np
 
 
-from wrapped import Wrapped
-from fps_counter import FPSCounter
-from finalizable_queue import FinalizableQueue
+from .wrapped import Wrapped
+from .fps_counter import FPSCounter
+from .finalizable_queue import FinalizableQueue
 
 
 def coupling_loop(

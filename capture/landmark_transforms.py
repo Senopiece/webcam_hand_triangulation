@@ -1,5 +1,5 @@
 import numpy as np
-from linal_utils import is_point_in_smoothed_polygon
+from .linal_utils import is_point_in_smoothed_polygon
 
 # NOTE: updating this file dont forget to sync the description of "track" parameter with cameras.def.example.json5
 

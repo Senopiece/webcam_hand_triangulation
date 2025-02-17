@@ -5,9 +5,9 @@ from typing import Tuple
 import cv2
 import numpy as np
 
-from wrapped import Wrapped
-from fps_counter import FPSCounter
-from models import CameraParams
+from .wrapped import Wrapped
+from .fps_counter import FPSCounter
+from .models import CameraParams
 
 
 def cap_reading(

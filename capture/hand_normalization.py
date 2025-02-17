@@ -1,5 +1,5 @@
 import numpy as np
-from linal_utils import rotation_matrix_from_vectors
+from .linal_utils import rotation_matrix_from_vectors
 
 
 def normalize_hand(hand_3d_points):

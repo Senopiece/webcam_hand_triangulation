@@ -3,8 +3,8 @@ from typing import List
 import cv2
 import numpy as np
 
-from models import ContextedLandmark
-from projection import project
+from .models import ContextedLandmark
+from .projection import project
 
 
 def stereo_triangulate_lmcs(P1, P2, lm1, lm2):

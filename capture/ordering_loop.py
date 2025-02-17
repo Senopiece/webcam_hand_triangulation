@@ -1,5 +1,5 @@
 from typing import Any, Dict
-from finalizable_queue import EmptyFinalized, FinalizableQueue
+from .finalizable_queue import EmptyFinalized, FinalizableQueue
 
 
 def ordering_loop(

@@ -5,10 +5,10 @@ import numpy as np
 from typing import Tuple
 import mediapipe as mp
 
-from projection import compute_sphere_rotating_camera_projection_matrix, project
-from finalizable_queue import EmptyFinalized, FinalizableQueue
-from fps_counter import FPSCounter
-from draw_utils import draw_left_top, draw_right_bottom
+from .projection import compute_sphere_rotating_camera_projection_matrix, project
+from .finalizable_queue import EmptyFinalized, FinalizableQueue
+from .fps_counter import FPSCounter
+from .draw_utils import draw_left_top, draw_right_bottom
 
 
 mp_hands = mp.solutions.hands  # type: ignore

@@ -3,12 +3,12 @@ import numpy as np
 from typing import Any, Callable, List, Tuple
 import mediapipe as mp
 
-from models import CameraParams, ContextedLandmark
-from triangulation import triangulate_lmcs
-from projection import distorted_project
-from finalizable_queue import EmptyFinalized, FinalizableQueue
-from draw_utils import draw_left_top
-from hand_normalization import normalize_hand
+from .models import CameraParams, ContextedLandmark
+from .triangulation import triangulate_lmcs
+from .projection import distorted_project
+from .finalizable_queue import EmptyFinalized, FinalizableQueue
+from .draw_utils import draw_left_top
+from .hand_normalization import normalize_hand
 
 
 mp_hands = mp.solutions.hands  # type: ignore

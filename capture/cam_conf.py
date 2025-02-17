@@ -1,6 +1,6 @@
 from typing import Dict
 import cv2
-from models import CameraParams, ExtrinsicCameraParams, IntrinsicCameraParams
+from .models import CameraParams, ExtrinsicCameraParams, IntrinsicCameraParams
 import json5
 import numpy as np
 

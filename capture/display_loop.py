@@ -2,9 +2,9 @@ import multiprocessing
 import multiprocessing.synchronize
 import cv2
 
-from finalizable_queue import EmptyFinalized, FinalizableQueue
-from fps_counter import FPSCounter
-from draw_utils import draw_left_top
+from .finalizable_queue import EmptyFinalized, FinalizableQueue
+from .fps_counter import FPSCounter
+from .draw_utils import draw_left_top
 
 
 def display_loop(
