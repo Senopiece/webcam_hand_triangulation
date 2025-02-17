@@ -177,5 +177,3 @@ pyrightconfig.json
 
 cameras.def.json5
 cameras.calib.json5
-hand_landmarker.task
-test.mkv
