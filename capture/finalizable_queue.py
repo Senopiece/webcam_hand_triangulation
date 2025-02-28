@@ -30,6 +30,9 @@ class FinalizableQueue(ABC, Generic[T]):
     @abstractmethod
     def finalize(self) -> None: ...
 
+    @abstractmethod
+    def is_finalized(self) -> bool: ...
+
 
 class ThreadFinalizableQueue(FinalizableQueue[T]):
     def __init__(self) -> None:
@@ -72,6 +75,9 @@ class ThreadFinalizableQueue(FinalizableQueue[T]):
                 self._finalized = True
                 self._non_empty_or_finalized.notify_all()
 
+    def is_finalized(self):
+        return self._finalized
+
 
 class ProcessFinalizableQueue(FinalizableQueue[T]):
     def __init__(self) -> None:
@@ -112,3 +118,6 @@ class ProcessFinalizableQueue(FinalizableQueue[T]):
             with self._lock:
                 self._finalized.value = True
                 self._non_empty_or_finalized.notify_all()
+
+    def is_finalized(self):
+        return self._finalized.value
