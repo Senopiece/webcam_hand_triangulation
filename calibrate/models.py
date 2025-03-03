@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from pydantic import BaseModel
 
-from async_cb import CBProcessingPool
+from .async_cb import CBProcessingPool
 
 
 class PoV(BaseModel):

@@ -12,9 +12,9 @@ The default pattern to use is already rendered onto a pdf: [radon_checkerboard.p
 ### 2. Place cameras and make calibration
 1. Place cameras in a circle around the place where hand is supposed to be laying
 2. Install [calibrate/requirements.txt](calibrate/requirements.txt), [test/requirements.txt](test/requirements.txt) into your venv or global python installation
-3. Test what ids are assigned to cameras by probing different values with `python test --cam {id}` from the repository root (start with `--cam 0` and increment)
+3. Test what ids are assigned to cameras by probing different values with `python -m test --cam {id}` from the repository root (start with `--cam 0` and increment)
 4. Make a file `cameras.def.json5` in the repository root and fill it with something like [this](cameras.def.example.json5) (read important notes about .def and .calib files from the example def)
-5. Run `python calibrate` from the repository root and follow the instructions dropped down in the console:
+5. Run `python -m calibrate` from the repository root and follow the instructions dropped down in the console:
     ```
     === Camera Calibration Script ===
     Instructions:
@@ -31,6 +31,6 @@ The default pattern to use is already rendered onto a pdf: [radon_checkerboard.p
 
 ### 3. Capture hand
 1. Install [capture/requirements.txt](capture/requirements.txt) into your venv or global python installation
-2. Run `python capture` from the repository root
+2. Run `python -m capture` from the repository root
 
 [irl example](https://youtube.com/shorts/QCHkzZVtM5I)

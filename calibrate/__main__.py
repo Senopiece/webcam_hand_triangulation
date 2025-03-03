@@ -18,8 +18,8 @@ import numpy as np
 import json5
 import argparse
 
-from models import PoV
-from async_cb import AsyncCBThreadedSolution, CBProcessingPool
+from .models import PoV
+from .async_cb import AsyncCBThreadedSolution, CBProcessingPool
 
 # TODO: to get rid of separate .def and .calib and write the calibration back to the original file, manage somehow to keep the original formatting and comments
 # TODO: rewrite to threads to be in style sync with the capture/process
