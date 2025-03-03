@@ -1,8 +1,9 @@
+from typing import List
 import numpy as np
 from .linal_utils import rotation_matrix_from_vectors
 
 
-def normalize_hand(hand_3d_points):
+def normalize_hand(hand_3d_points) -> List[np.ndarray]:
     # Translate to origin
     T = -hand_3d_points[0]
     hand_3d_points = [pt + T for pt in hand_3d_points]

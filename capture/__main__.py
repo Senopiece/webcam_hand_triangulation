@@ -28,7 +28,7 @@ def main(
     cameras_params: Dict[int, CameraParams],
     couple_fps: int,
     desired_window_size: Tuple[int, int],
-    workers: int,
+    triangulation_workers_num: int,
     draw_origin_landmarks: bool,
 ):
     # Check camera parameters
@@ -92,7 +92,7 @@ def main(
             ),
             daemon=True,
         )
-        for _ in range(workers)
+        for _ in range(triangulation_workers_num)
     ]
     for process in processing_loops_pool:
         process.start()
@@ -226,6 +226,6 @@ if __name__ == "__main__":
         cameras_params=load_cameras_parameters(args.cfile),
         couple_fps=args.couple_fps,
         desired_window_size=desired_window_size,
-        workers=args.workers,
+        triangulation_workers_num=args.workers,
         draw_origin_landmarks=args.origin_landmarks,
     )

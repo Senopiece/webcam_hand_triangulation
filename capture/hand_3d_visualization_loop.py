@@ -98,8 +98,6 @@ def hand_3d_visualization_loop(
     while True:
         try:
             result = hand_points_queue.get()
-            if result is None:
-                continue
             hand_points, coupling_fps, debt_size = result
         except EmptyFinalized:
             break
