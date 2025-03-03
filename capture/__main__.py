@@ -11,17 +11,17 @@ import numpy as np
 from typing import Dict, List, Tuple
 import argparse
 
-from cam_conf import load_cameras_parameters
-from wrapped import Wrapped
-from models import CameraParams
-from finalizable_queue import ThreadFinalizableQueue, ProcessFinalizableQueue
-from cap_reading_loop import cap_reading
-from coupling_loop import coupling_loop
-from processing_loop import processing_loop
-from ordering_loop import ordering_loop
-from hand_3d_visualization_loop import hand_3d_visualization_loop
-from display_loop import display_loop
-from landmark_transforms import landmark_transforms
+from .cam_conf import load_cameras_parameters
+from .wrapped import Wrapped
+from .models import CameraParams
+from .finalizable_queue import ThreadFinalizableQueue, ProcessFinalizableQueue
+from .cap_reading_loop import cap_reading
+from .coupling_loop import coupling_loop
+from .processing_loop import processing_loop
+from .ordering_loop import ordering_loop
+from .hand_3d_visualization_loop import hand_3d_visualization_loop
+from .display_loop import display_loop
+from .landmark_transforms import landmark_transforms
 
 
 def main(

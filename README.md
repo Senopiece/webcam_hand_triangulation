@@ -1,5 +1,7 @@
 ## Main Usage Scenario
 
+> NOTE: using python 3.12
+
 > NOTE: This usage scenario may alternate with your needs - maybe you want a different pattern size or shape or maybe you want more coupling fps, or you want more than four cameras etc. But scripts are flexible enough to do so without code modification. To do so, modify the [radon_checkerboard.yaml](checkerboard/radon_checkerboard.yaml), `cameras.def.json5` and inspect `calibrate --help` and `capture --help` to get a clue what args to modify.
 
 ### 1. Make calibration pattern
