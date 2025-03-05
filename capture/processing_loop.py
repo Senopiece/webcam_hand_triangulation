@@ -4,7 +4,6 @@ from typing import Any, Callable, List, Tuple
 import mediapipe as mp
 
 from .models import CameraParams
-from .projection import distorted_project
 from .finalizable_queue import EmptyFinalized, FinalizableQueue
 from .draw_utils import draw_left_top, draw_origin_landmarks, draw_reprojected_landmarks
 from .hand_normalization import normalize_hand

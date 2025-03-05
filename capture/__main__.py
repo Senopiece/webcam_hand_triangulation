@@ -11,6 +11,7 @@ import numpy as np
 from typing import Dict, List, Tuple
 import argparse
 
+from .high_priority import set_high_priority
 from .cam_conf import load_cameras_parameters
 from .wrapped import Wrapped
 from .models import CameraParams
@@ -31,6 +32,8 @@ def main(
     triangulation_workers_num: int,
     draw_origin_landmarks: bool,
 ):
+    set_high_priority()
+
     # Check camera parameters
     if len(cameras_params) < 2:
         print("Need at least two cameras with calibration data.")
