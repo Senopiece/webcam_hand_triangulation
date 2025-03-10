@@ -30,7 +30,8 @@ The default pattern to use is already rendered onto a pdf: [radon_checkerboard.p
 [irl example](https://www.youtube.com/shorts/nwtn0VRGkjQ)
 
 ### 3. Capture hand
-1. Install [capture/requirements.txt](capture/requirements.txt) into your venv or global python installation
-2. Run `python -m capture` from the repository root
+1. Make sure all the hardware is ready - cameras are connected and calibrated
+2. Install [capture/requirements.txt](capture/requirements.txt) into your venv or global python installation
+3. Run `python -m capture` from the repository root
 
 [irl example](https://youtube.com/shorts/QCHkzZVtM5I)
