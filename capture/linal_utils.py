@@ -1,23 +1,26 @@
 import numpy as np
+import torch
 
 
-def rotation_matrix_from_vectors(vec1, vec2):
-    """Find the rotation matrix that aligns vec1 to vec2
-    :param vec1: A 3d "source" vector
-    :param vec2: A 3d "destination" vector
-    :return mat: A transform matrix (3x3) which when applied to vec1, aligns it with vec2.
-    """
-    a, b = (vec1 / np.linalg.norm(vec1)).reshape(3), (
-        vec2 / np.linalg.norm(vec2)
-    ).reshape(3)
-    v = np.cross(a, b)
-    if any(v):  # if not all zeros then
-        c = np.dot(a, b)
-        s = np.linalg.norm(v)
-        kmat = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-        return np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s**2))
-    else:
-        return np.eye(3)  # cross of all zeros only occurs on identical directions
+def rotation_matrix_from_vectors(
+    vec1: torch.Tensor,
+    vec2: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    a = vec1 / vec1.norm()
+    b = vec2 / vec2.norm()
+    v = torch.cross(a, b, dim=-1)
+    if v.norm() < eps:
+        return torch.eye(3, dtype=vec1.dtype, device=vec1.device)
+    c = torch.dot(a, b)
+    s = v.norm()
+    K = torch.tensor(
+        [[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]],
+        dtype=vec1.dtype,
+        device=vec1.device,
+    )
+    R = torch.eye(3, dtype=vec1.dtype, device=vec1.device)
+    return R + K + K @ K * ((1 - c) / (s * s))
 
 
 def signed_distance_to_edge(p, a, b):

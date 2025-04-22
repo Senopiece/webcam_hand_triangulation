@@ -2,11 +2,12 @@ import cv2
 import numpy as np
 from typing import Any, Callable, List, Tuple
 import mediapipe as mp
+import torch
 
+from .kinematics import inverse_hand_kinematics
 from .models import CameraParams
 from .finalizable_queue import EmptyFinalized, FinalizableQueue
 from .draw_utils import draw_left_top, draw_origin_landmarks, draw_reprojected_landmarks
-from .hand_normalization import normalize_hand
 from .hand_triangulator import HandTriangulator
 
 mp_hands = mp.solutions.hands  # type: ignore
@@ -39,14 +40,30 @@ def processing_loop(
 
         del indexed_frames
 
-        landmarks, chosen_cams, points_3d = triangulator.triangulate(frames)
+        landmarks, chosen_cams, points_3d_list = triangulator.triangulate(frames)
+
+        # convert to 3d hand format for inverse_hand_kinematics
+        batched_points3d = None
+        if points_3d_list:
+            points_3d = np.vstack(points_3d_list)
+            points_3d = np.delete(
+                points_3d, 1, axis=0
+            )  # there is no thumb base in umetrack
+            points_3d = torch.tensor(points_3d, dtype=torch.float32)
+            batched_points3d = points_3d.unsqueeze(0)
 
         # Send to 3d visualization
         results_queue.put(
             (
                 index,
                 (
-                    normalize_hand(points_3d) if points_3d else [],
+                    (
+                        inverse_hand_kinematics(batched_points3d)
+                        .squeeze(0)
+                        .numpy(force=True)
+                        if batched_points3d is not None
+                        else None
+                    ),
                     coupling_fps,
                     coupled_frames_queue.qsize(),
                 ),
@@ -64,7 +81,7 @@ def processing_loop(
             draw_origin_landmarks(landmarks, frames)
 
         # Draw reprojected landmarks
-        draw_reprojected_landmarks(points_3d, frames, cameras_params, chosen_cams)
+        draw_reprojected_landmarks(points_3d_list, frames, cameras_params, chosen_cams)
 
         # Draw cap fps for every pov
         for fps, frame in zip(cap_fps, frames):

@@ -79,7 +79,7 @@ def main(
     coupling_worker.start()
 
     # Processing workers
-    hand_points_queue = ThreadFinalizableQueue()
+    hand_angles_queue = ThreadFinalizableQueue()
     processed_queues = [ThreadFinalizableQueue() for _ in cameras_ids]
     processing_loops_pool = [
         threading.Thread(
@@ -90,7 +90,7 @@ def main(
                 desired_window_size,
                 list(cameras_params.values()),
                 coupled_frames_queue,
-                hand_points_queue,
+                hand_angles_queue,
                 processed_queues,
             ),
             daemon=True,
@@ -101,16 +101,16 @@ def main(
         process.start()
 
     # Sort hand points
-    ordered_hand_points_queue = ProcessFinalizableQueue()
-    hand_points_sorter = threading.Thread(
+    ordered_hand_angles_queue = ProcessFinalizableQueue()
+    hand_angles_sorter = threading.Thread(
         target=ordering_loop,
         args=(
-            hand_points_queue,
-            ordered_hand_points_queue,
+            hand_angles_queue,
+            ordered_hand_angles_queue,
         ),
         daemon=True,
     )
-    hand_points_sorter.start()
+    hand_angles_sorter.start()
 
     # Visualize 3d hand
     hand_3d_visualizer = multiprocessing.Process(
@@ -118,7 +118,7 @@ def main(
         args=(
             desired_window_size,
             cams_stop_event,
-            ordered_hand_points_queue,
+            ordered_hand_angles_queue,
         ),
         daemon=True,
     )
@@ -172,11 +172,11 @@ def main(
     for worker in processing_loops_pool:
         worker.join()
 
-    hand_points_queue.finalize()
+    hand_angles_queue.finalize()
     for queue in processed_queues:
         queue.finalize()
 
-    hand_points_sorter.join()
+    hand_angles_sorter.join()
     for worker in display_ordering_loops:
         worker.join()
 

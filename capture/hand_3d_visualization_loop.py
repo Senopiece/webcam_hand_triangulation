@@ -4,6 +4,9 @@ import multiprocessing.synchronize
 import numpy as np
 from typing import Tuple
 import mediapipe as mp
+import torch
+
+from capture.kinematics import forward_hand_kinematics
 
 from .projection import compute_sphere_rotating_camera_projection_matrix, project
 from .finalizable_queue import EmptyFinalized, FinalizableQueue
@@ -13,11 +16,38 @@ from .draw_utils import draw_left_top, draw_right_bottom
 
 mp_hands = mp.solutions.hands  # type: ignore
 
+HAND_CONNECTIONS = [
+    (0, 1),
+    (1, 2),
+    (2, 3),  # Thumb
+    (0, 4),
+    (4, 5),
+    (5, 6),
+    (6, 7),  # Index
+    (0, 8),
+    (8, 9),
+    (9, 10),
+    (10, 11),  # Middle
+    (0, 12),
+    (12, 13),
+    (13, 14),
+    (14, 15),  # Ring
+    (0, 16),
+    (16, 17),
+    (17, 18),
+    (18, 19),  # Pinky
+    # Palm
+    (1, 4),
+    (4, 8),
+    (8, 12),
+    (12, 16),
+]
+
 
 def hand_3d_visualization_loop(
     window_size: Tuple[int, int],
     stop_event: multiprocessing.synchronize.Event,
-    hand_points_queue: FinalizableQueue,
+    hand_angles_queue: FinalizableQueue,
 ):
     window_title = "3D visualization"
     cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
@@ -97,8 +127,17 @@ def hand_3d_visualization_loop(
 
     while True:
         try:
-            result = hand_points_queue.get()
-            hand_points, coupling_fps, debt_size = result
+            result = hand_angles_queue.get()
+            hand_angles, coupling_fps, debt_size = result
+            hand_points = None
+            if hand_angles is not None:
+                hand_angles = torch.tensor(hand_angles, dtype=torch.float32)
+                batch_hand_angles = hand_angles.unsqueeze(0)
+                hand_points = (
+                    forward_hand_kinematics(batch_hand_angles)
+                    .squeeze(0)
+                    .numpy(force=True)
+                )
         except EmptyFinalized:
             break
 
@@ -137,12 +176,12 @@ def hand_3d_visualization_loop(
             frame.shape[0],
         )
 
-        # Project points
-        landmarks = [project(point_3d, P) for point_3d in hand_points]
+        if hand_points is not None:
+            # Project points
+            landmarks = [project(point_3d, P) for point_3d in hand_points]
 
-        if len(landmarks) != 0:
             # Draw hand connections
-            for connection in mp_hands.HAND_CONNECTIONS:
+            for connection in HAND_CONNECTIONS:
                 start_idx, end_idx = connection
                 start_pt, z_start = landmarks[start_idx]
                 end_pt, z_end = landmarks[end_idx]
@@ -210,6 +249,6 @@ def hand_3d_visualization_loop(
             # Stop capturing loop
             stop_event.set()
 
-        hand_points_queue.task_done()
+        hand_angles_queue.task_done()
 
     print("3D visualization loop finished.")
