@@ -1,3 +1,4 @@
+import time
 import cv2
 import multiprocessing
 import multiprocessing.synchronize
@@ -6,6 +7,7 @@ from typing import Tuple
 import mediapipe as mp
 import torch
 
+from capture.hand_normalization import normalize_hand
 from capture.kinematics import forward_hand_kinematics
 
 from .projection import compute_sphere_rotating_camera_projection_matrix, project
@@ -70,7 +72,8 @@ def hand_3d_visualization_loop(
     camera_distance_delta = 10
 
     # Camera parameters
-    camera_target = np.array([0, 70, 0])
+    middle_bone_length = 70
+    camera_target = np.array([0, middle_bone_length, 0])
     camera_fov = 60  # Field of view in degrees
     camera_near = 0.1  # Near clipping plane
     camera_far = 100.0  # Far clipping plane
@@ -125,19 +128,24 @@ def hand_3d_visualization_loop(
 
     cv2.setMouseCallback(window_title, handle_mouse_event)
 
+    latest_res = None, 0, 0
     while True:
+        start_time = time.time()
         try:
-            result = hand_angles_queue.get()
-            hand_angles, coupling_fps, debt_size = result
-            hand_points = None
-            if hand_angles is not None:
-                hand_angles = torch.tensor(hand_angles, dtype=torch.float32)
-                batch_hand_angles = hand_angles.unsqueeze(0)
-                hand_points = (
-                    forward_hand_kinematics(batch_hand_angles)
-                    .squeeze(0)
-                    .numpy(force=True)
-                )
+            result = hand_angles_queue.get_all_waiting(limit=1)
+            if len(result) != 0:
+                result = result[0]
+                hand_angles, coupling_fps, debt_size = result
+                hand_points = None
+                if hand_angles is not None:
+                    hand_angles = torch.tensor(hand_angles, dtype=torch.float32)
+                    batch_hand_angles = hand_angles.unsqueeze(0)
+                    hand_points = middle_bone_length * normalize_hand(
+                        forward_hand_kinematics(batch_hand_angles).squeeze(0)
+                    ).numpy(force=True)
+                latest_res = hand_points, coupling_fps, debt_size
+            else:
+                hand_points, coupling_fps, debt_size = latest_res
         except EmptyFinalized:
             break
 
@@ -243,8 +251,9 @@ def hand_3d_visualization_loop(
         # Update the frame
         cv2.imshow(window_title, frame)
 
-        # Maybe stop
-        key = cv2.waitKey(1)
+        # Maybe stop, limit 60 fps
+        render_time = time.time() - start_time
+        key = cv2.waitKey(max(int(16 - (render_time * 1000)), 1))
         if key & 0xFF == ord("q"):
             # Stop capturing loop
             stop_event.set()

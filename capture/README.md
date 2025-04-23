@@ -1,5 +1,7 @@
 ## Top-level functional diagram
 
+TODO: add ik pool
+
 ```mermaid
 flowchart TD
     subgraph CameraReaders

@@ -19,6 +19,9 @@ class FinalizableQueue(ABC, Generic[T]):
     def get(self) -> T: ...
 
     @abstractmethod
+    def get_all_waiting(self, limit: int = -1) -> list[T]: ...
+
+    @abstractmethod
     def task_done(self) -> None: ...
 
     @abstractmethod
@@ -58,6 +61,22 @@ class ThreadFinalizableQueue(FinalizableQueue[T]):
                     if self._finalized:
                         raise EmptyFinalized()
                 self._non_empty_or_finalized.wait()
+
+    def get_all_waiting(self, limit: int = -1) -> list[T]:
+        with self._non_empty_or_finalized:
+            with self._lock:
+                if not self.empty():
+                    items = []
+                    count = 0
+                    while not self.empty() and (limit == -1 or count < limit):
+                        item = self._queue.get_nowait()
+                        items.append(item)
+                        count += 1
+                        self._queue.task_done()
+                    return items
+                if self._finalized:
+                    raise EmptyFinalized()
+                return []
 
     def task_done(self) -> None:
         with self._lock:
@@ -103,6 +122,20 @@ class ProcessFinalizableQueue(FinalizableQueue[T]):
                     if self._finalized.value:
                         raise EmptyFinalized()
                 self._non_empty_or_finalized.wait()
+
+    def get_all_waiting(self, limit: int = -1) -> list[T]:
+        with self._non_empty_or_finalized:
+            with self._lock:
+                if not self.empty():
+                    items = []
+                    count = 0
+                    while not self.empty() and (limit == -1 or count < limit):
+                        items.append(self._queue.get_nowait())
+                        count += 1
+                    return items
+                if self._finalized.value:
+                    raise EmptyFinalized()
+                return []
 
     def task_done(self) -> None:
         pass

@@ -1,11 +1,9 @@
-import numpy as np
 from .linal_utils import rotation_matrix_from_vectors
-import numpy as np
 import torch
 
 
 def normalize_hand(
-    hand_3d_points: torch.Tensor | np.ndarray,
+    hand_3d_points: torch.Tensor,
     whrist_base: int = 0,
     middle_finger_inner_bone: int = 8,
     point_finger_inner_bone: int = 4,
@@ -19,23 +17,6 @@ def normalize_hand(
       4. rotate around Y so `point_finger_inner_bone` lies in the +Z half-plane
     Returns same shape as input.
     """
-    if not isinstance(hand_3d_points, torch.Tensor):
-        hand_3d_points = torch.tensor(hand_3d_points, dtype=torch.float32)
-
-    # if batch of hands, just loop
-    if hand_3d_points.dim() == 3:
-        B, L, _ = hand_3d_points.shape
-        normalized = torch.empty_like(hand_3d_points)
-        for b in range(B):
-            # recursive call on each (L,3)
-            normalized[b] = normalize_hand(
-                hand_3d_points[b],
-                whrist_base,
-                middle_finger_inner_bone,
-                point_finger_inner_bone,
-                eps,
-            )
-        return normalized
 
     # --- below is the original single‑hand logic for shape (L,3) ---
     device, dtype = hand_3d_points.device, hand_3d_points.dtype
@@ -66,3 +47,7 @@ def normalize_hand(
         hand = hand @ R2.T
 
     return hand
+
+
+def normalize_hands(hands: torch.Tensor):
+    return torch.stack([normalize_hand(hand) for hand in hands])

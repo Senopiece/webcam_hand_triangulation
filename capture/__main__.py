@@ -1,16 +1,17 @@
 import os
 import sys
 
+
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 import cv2
 
 import multiprocessing
-import multiprocessing.synchronize
 import threading
 import numpy as np
 from typing import Dict, List, Tuple
 import argparse
 
+from .ik_loop import ik_loop
 from .high_priority import set_high_priority
 from .cam_conf import load_cameras_parameters
 from .wrapped import Wrapped
@@ -79,7 +80,7 @@ def main(
     coupling_worker.start()
 
     # Processing workers
-    hand_angles_queue = ThreadFinalizableQueue()
+    hand_points_queue = ProcessFinalizableQueue()
     processed_queues = [ThreadFinalizableQueue() for _ in cameras_ids]
     processing_loops_pool = [
         threading.Thread(
@@ -90,7 +91,7 @@ def main(
                 desired_window_size,
                 list(cameras_params.values()),
                 coupled_frames_queue,
-                hand_angles_queue,
+                hand_points_queue,
                 processed_queues,
             ),
             daemon=True,
@@ -98,6 +99,23 @@ def main(
         for _ in range(triangulation_workers_num)
     ]
     for process in processing_loops_pool:
+        process.start()
+
+    # Pooled inverse kinematics
+    ik_workers_num = 8  # TODO: extract as arg
+    hand_angles_queue = ProcessFinalizableQueue()
+    ik_loops_pool = [
+        multiprocessing.Process(
+            target=ik_loop,
+            args=(
+                hand_points_queue,
+                hand_angles_queue,
+            ),
+            daemon=True,
+        )
+        for _ in range(ik_workers_num)
+    ]
+    for process in ik_loops_pool:
         process.start()
 
     # Sort hand points
@@ -170,6 +188,10 @@ def main(
     coupling_worker.join()
 
     for worker in processing_loops_pool:
+        worker.join()
+
+    hand_points_queue.finalize()
+    for worker in ik_loops_pool:
         worker.join()
 
     hand_angles_queue.finalize()

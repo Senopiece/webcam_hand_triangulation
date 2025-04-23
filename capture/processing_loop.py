@@ -43,27 +43,19 @@ def processing_loop(
         landmarks, chosen_cams, points_3d_list = triangulator.triangulate(frames)
 
         # convert to 3d hand format for inverse_hand_kinematics
-        batched_points3d = None
+        points_3d = None
         if points_3d_list:
             points_3d = np.vstack(points_3d_list)
             points_3d = np.delete(
                 points_3d, 1, axis=0
             )  # there is no thumb base in umetrack
-            points_3d = torch.tensor(points_3d, dtype=torch.float32)
-            batched_points3d = points_3d.unsqueeze(0)
 
         # Send to 3d visualization
         results_queue.put(
             (
                 index,
                 (
-                    (
-                        inverse_hand_kinematics(batched_points3d)
-                        .squeeze(0)
-                        .numpy(force=True)
-                        if batched_points3d is not None
-                        else None
-                    ),
+                    points_3d,
                     coupling_fps,
                     coupled_frames_queue.qsize(),
                 ),
