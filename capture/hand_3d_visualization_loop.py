@@ -4,7 +4,9 @@ import multiprocessing.synchronize
 import numpy as np
 from typing import Tuple
 import mediapipe as mp
+from scipy.signal import savgol_coeffs
 
+from .writer import HandWriter
 from .projection import compute_sphere_rotating_camera_projection_matrix, project
 from .finalizable_queue import EmptyFinalized, FinalizableQueue
 from .fps_counter import FPSCounter
@@ -21,6 +23,9 @@ def hand_3d_visualization_loop(
 ):
     window_title = "3D visualization"
     cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
+
+    # TODO: writer not in here
+    writer = HandWriter("dataset.rec")
 
     fps_counter = FPSCounter()
     frame = np.zeros((window_size[1], window_size[0], 3), dtype=np.uint8)
@@ -95,12 +100,33 @@ def hand_3d_visualization_loop(
 
     cv2.setMouseCallback(window_title, handle_mouse_event)
 
+    # TODO: filter not in here
+    kernel_size = 5
+    kernel = savgol_coeffs(window_length=5, polyorder=2)
+    result_window = []
     while True:
         try:
             result = hand_points_queue.get()
             hand_points, coupling_fps, debt_size = result
         except EmptyFinalized:
             break
+
+        if len(hand_points) != 0:
+            result_window.append(hand_points)
+
+            if len(result_window) > kernel_size:
+                result_window.pop(0)
+                stacked = np.stack(result_window)
+                hand_points = np.tensordot(kernel, stacked, axes=([0], [0]))
+            else:
+                result_window = [hand_points] * (kernel_size - 1)
+
+            nppose = np.vstack(hand_points)  # type: ignore
+            nppose = np.delete(nppose, 1, axis=0)
+            nppose = nppose.astype(dtype=np.float32)
+            writer.add(nppose)
+        else:
+            result_window = []
 
         # Clear prev frame
         frame.fill(0)
@@ -212,4 +238,5 @@ def hand_3d_visualization_loop(
 
         hand_points_queue.task_done()
 
+    writer.close()
     print("3D visualization loop finished.")
