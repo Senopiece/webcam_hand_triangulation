@@ -6,6 +6,8 @@ from typing import Tuple
 import mediapipe as mp
 from scipy.signal import savgol_coeffs
 
+from .kinematics import hand_landmarks_by_angles
+from .hand_normalization import BONE_CONNECTIONS
 from .writer import HandWriter
 from .projection import compute_sphere_rotating_camera_projection_matrix, project
 from .finalizable_queue import EmptyFinalized, FinalizableQueue
@@ -107,11 +109,19 @@ def hand_3d_visualization_loop(
     while True:
         try:
             result = hand_points_queue.get()
-            hand_points, coupling_fps, debt_size = result
+            hand_data, coupling_fps, debt_size = result
         except EmptyFinalized:
             break
 
-        if len(hand_points) != 0:
+        hand_points = None
+        if hand_data is not None:
+            if isinstance(hand_data, np.ndarray):
+                hand_points = hand_landmarks_by_angles(hand_data)
+            else:
+                hand_points = hand_data
+
+        if hand_points is not None:
+            hand_points = np.vstack(hand_points, dtype=np.float32)  # type: ignore
             result_window.append(hand_points)
 
             if len(result_window) > kernel_size:
@@ -121,10 +131,12 @@ def hand_3d_visualization_loop(
             else:
                 result_window = [hand_points] * (kernel_size - 1)
 
-            nppose = np.vstack(hand_points)  # type: ignore
-            nppose = np.delete(nppose, 1, axis=0)
-            nppose = nppose.astype(dtype=np.float32)
-            writer.add(nppose)
+            # Write to the dataset only if raw landmarks are streamed
+            if not isinstance(hand_data, np.ndarray):
+                writer.add(hand_points)
+
+            # Unnormalize for visualization
+            hand_points = [j * 70 for j in hand_points]
         else:
             result_window = []
 
@@ -164,11 +176,14 @@ def hand_3d_visualization_loop(
         )
 
         # Project points
-        landmarks = [project(point_3d, P) for point_3d in hand_points]
+        if hand_points is not None:
+            landmarks = [project(point_3d, P) for point_3d in hand_points]
+        else:
+            landmarks = []
 
         if len(landmarks) != 0:
             # Draw hand connections
-            for connection in mp_hands.HAND_CONNECTIONS:
+            for connection in BONE_CONNECTIONS:
                 start_idx, end_idx = connection
                 start_pt, z_start = landmarks[start_idx]
                 end_pt, z_end = landmarks[end_idx]

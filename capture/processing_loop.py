@@ -3,10 +3,11 @@ import numpy as np
 from typing import Any, Callable, List, Tuple
 import mediapipe as mp
 
+from .hand_normalization import fix_hand_landmarks_anatomy
+from .kinematics import inverse_hand_angles_by_landmarks
 from .models import CameraParams
 from .finalizable_queue import EmptyFinalized, FinalizableQueue
 from .draw_utils import draw_left_top, draw_origin_landmarks, draw_reprojected_landmarks
-from .hand_normalization import normalize_hand
 from .hand_triangulator import HandTriangulator
 
 mp_hands = mp.solutions.hands  # type: ignore
@@ -41,12 +42,29 @@ def processing_loop(
 
         landmarks, chosen_cams, points_3d = triangulator.triangulate(frames)
 
+        def rm_th_base(points_3d: List[np.ndarray]):
+            points_3d_no_th_base = points_3d.copy()
+            points_3d_no_th_base.pop(1)
+            return points_3d_no_th_base
+
         # Send to 3d visualization
         results_queue.put(
             (
                 index,
                 (
-                    normalize_hand(points_3d) if points_3d else [],
+                    # uncomment to collect dataset for estimating morphology
+                    # (
+                    #     fix_hand_landmarks_anatomy(rm_th_base(points_3d))
+                    #     if points_3d
+                    #     else None
+                    # ),
+                    (
+                        inverse_hand_angles_by_landmarks(
+                            fix_hand_landmarks_anatomy(rm_th_base(points_3d))
+                        )
+                        if points_3d
+                        else None
+                    ),
                     coupling_fps,
                     coupled_frames_queue.qsize(),
                 ),
