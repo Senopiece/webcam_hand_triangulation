@@ -3,6 +3,7 @@ import numpy as np
 from typing import Any, Callable, List, Tuple
 import mediapipe as mp
 
+from .hand_utils import rm_th_base
 from .hand_normalization import fix_hand_landmarks_anatomy
 from .kinematics import inverse_hand_angles_by_landmarks
 from .models import CameraParams
@@ -41,11 +42,6 @@ def processing_loop(
         del indexed_frames
 
         landmarks, chosen_cams, points_3d = triangulator.triangulate(frames)
-
-        def rm_th_base(points_3d: List[np.ndarray]):
-            points_3d_no_th_base = points_3d.copy()
-            points_3d_no_th_base.pop(1)
-            return points_3d_no_th_base
 
         # Send to 3d visualization
         results_queue.put(
