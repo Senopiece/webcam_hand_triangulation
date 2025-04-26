@@ -109,7 +109,7 @@ def hand_3d_visualization_loop(
     while True:
         try:
             result = hand_points_queue.get()
-            hand_data, coupling_fps, debt_size = result
+            hand_data, coupling_fps = result
         except EmptyFinalized:
             break
 
@@ -235,8 +235,7 @@ def hand_3d_visualization_loop(
                 )
 
         # Draw coupling fps
-        draw_right_bottom(1, f"Couple FPS: {coupling_fps}", frame)
-        draw_right_bottom(0, f"Debt: {debt_size}", frame)
+        draw_right_bottom(0, f"Couple FPS: {coupling_fps}", frame)
 
         # Draw FPS text on the frame
         fps_counter.count()

@@ -4,7 +4,7 @@ from typing import Any, Callable, List, Tuple
 import mediapipe as mp
 
 from .hand_utils import rm_th_base
-from .hand_normalization import fix_hand_landmarks_anatomy
+from .hand_normalization import normalize_hand
 from .kinematics import inverse_hand_angles_by_landmarks
 from .models import CameraParams
 from .finalizable_queue import EmptyFinalized, FinalizableQueue
@@ -56,13 +56,12 @@ def processing_loop(
                     # ),
                     (
                         inverse_hand_angles_by_landmarks(
-                            fix_hand_landmarks_anatomy(rm_th_base(points_3d))
+                            normalize_hand(rm_th_base(points_3d))
                         )
                         if points_3d
                         else None
                     ),
                     coupling_fps,
-                    coupled_frames_queue.qsize(),
                 ),
             )
         )
