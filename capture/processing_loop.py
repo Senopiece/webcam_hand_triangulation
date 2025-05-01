@@ -49,18 +49,18 @@ def processing_loop(
                 index,
                 (
                     # uncomment to collect dataset for estimating morphology
-                    (
-                        fix_hand_landmarks_anatomy(rm_th_base(points_3d))
-                        if points_3d
-                        else None
-                    ),
                     # (
-                    #     inverse_hand_angles_by_landmarks(
-                    #         normalize_hand(rm_th_base(points_3d))
-                    #     )
+                    #     fix_hand_landmarks_anatomy(rm_th_base(points_3d))
                     #     if points_3d
                     #     else None
                     # ),
+                    (
+                        inverse_hand_angles_by_landmarks(
+                            normalize_hand(rm_th_base(points_3d))
+                        )
+                        if points_3d
+                        else None
+                    ),
                     coupling_fps,
                 ),
             )

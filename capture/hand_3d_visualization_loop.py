@@ -125,8 +125,8 @@ def hand_3d_visualization_loop(
             hand_points = np.vstack(hand_points, dtype=np.float32)  # type: ignore
 
             # Write to the dataset only if raw landmarks are streamed
-            # if not isinstance(hand_data, np.ndarray):
-            #     writer.add(hand_points)
+            if not isinstance(hand_data, np.ndarray):
+                writer.add(hand_points)
 
             # Filter thresholding
             if last_hand_pos is not None:
