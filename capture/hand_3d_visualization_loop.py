@@ -103,9 +103,10 @@ def hand_3d_visualization_loop(
     cv2.setMouseCallback(window_title, handle_mouse_event)
 
     # TODO: filter not in here
-    kernel_size = 5
-    kernel = savgol_coeffs(window_length=5, polyorder=2)
-    result_window = []
+    last_hand_pos = None  # for threshold action filter
+    threshold = 0.02  # Discrete threshold for quick response
+    alpha = 0.01  # Weight for the new observation in Bayesian update (0 < alpha < 1) if under threshold
+
     while True:
         try:
             result = hand_points_queue.get()
@@ -122,23 +123,37 @@ def hand_3d_visualization_loop(
 
         if hand_points is not None:
             hand_points = np.vstack(hand_points, dtype=np.float32)  # type: ignore
-            result_window.append(hand_points)
-
-            if len(result_window) > kernel_size:
-                result_window.pop(0)
-                stacked = np.stack(result_window)
-                hand_points = np.tensordot(kernel, stacked, axes=([0], [0]))
-            else:
-                result_window = [hand_points] * (kernel_size - 1)
 
             # Write to the dataset only if raw landmarks are streamed
-            if not isinstance(hand_data, np.ndarray):
-                writer.add(hand_points)
+            # if not isinstance(hand_data, np.ndarray):
+            #     writer.add(hand_points)
+
+            # Filter thresholding
+            if last_hand_pos is not None:
+                distances = np.linalg.norm(hand_points - last_hand_pos, axis=1)
+                mask = distances > threshold
+
+                # Update positions above the threshold
+                last_hand_pos = np.where(
+                    mask[:, np.newaxis], hand_points, last_hand_pos
+                )
+
+                # Bayesian update for positions below the threshold
+                below_threshold_mask = ~mask
+                if np.any(below_threshold_mask):
+                    last_hand_pos[below_threshold_mask] = (
+                        alpha * hand_points[below_threshold_mask]
+                        + (1 - alpha) * last_hand_pos[below_threshold_mask]
+                    )
+            else:
+                last_hand_pos = hand_points
+
+            hand_points = last_hand_pos
 
             # Unnormalize for visualization
-            hand_points = [j * 70 for j in hand_points]
+            hand_points = hand_points * 70
         else:
-            result_window = []
+            last_hand_pos = None
 
         # Clear prev frame
         frame.fill(0)
