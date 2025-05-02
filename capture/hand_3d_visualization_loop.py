@@ -4,7 +4,6 @@ import multiprocessing.synchronize
 import numpy as np
 from typing import Tuple
 import mediapipe as mp
-from scipy.signal import savgol_coeffs
 
 from .kinematics import hand_landmarks_by_angles
 from .hand_normalization import BONE_CONNECTIONS
