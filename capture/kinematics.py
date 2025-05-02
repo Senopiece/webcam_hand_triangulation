@@ -1,4 +1,3 @@
-from unittest.mock import DEFAULT
 import numpy as np
 from typing import List
 
@@ -262,7 +261,7 @@ def inverse_hand_angles_by_landmarks(
     thumb_base = morphology[0][3:6]
 
     # Insert thumb_base at the correct position
-    landmarks = landmarks[:1] + [thumb_base] + landmarks[1:]
+    landmarks.insert(1, thumb_base)
 
     for i, morph in enumerate(morphology):
         base_idx = i * 4 + 1
