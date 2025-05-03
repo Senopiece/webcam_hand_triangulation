@@ -4,7 +4,7 @@ from typing import Any, Callable, List, Tuple
 import mediapipe as mp
 
 from .hand_utils import rm_th_base
-from .hand_normalization import fix_hand_landmarks_anatomy, normalize_hand
+from .hand_normalization import normalize_hand
 from .kinematics import inverse_hand_angles_by_landmarks
 from .models import CameraParams
 from .finalizable_queue import EmptyFinalized, FinalizableQueue
@@ -48,12 +48,6 @@ def processing_loop(
             (
                 index,
                 (
-                    # uncomment to collect dataset for estimating morphology
-                    # (
-                    #     fix_hand_landmarks_anatomy(rm_th_base(points_3d))
-                    #     if points_3d
-                    #     else None
-                    # ),
                     (
                         inverse_hand_angles_by_landmarks(
                             normalize_hand(rm_th_base(points_3d))

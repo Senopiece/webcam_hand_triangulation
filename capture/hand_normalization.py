@@ -25,54 +25,6 @@ BONE_CONNECTIONS = [
     (18, 19),  # Pinky
 ]
 
-# Desired bone lengths
-BONE_LENGTHS = {
-    (0, 1): 7.0,
-    (1, 2): 3.5,
-    (2, 3): 2.5,  # Thumb
-    (0, 4): 9.0,
-    (4, 5): 4.0,
-    (5, 6): 2.5,
-    (6, 7): 2.0,  # Index
-    (0, 8): 9.0,
-    (8, 9): 5.0,
-    (9, 10): 3.0,
-    (10, 11): 2.0,  # Middle
-    (0, 12): 8.5,
-    (12, 13): 5.0,
-    (13, 14): 3.0,
-    (14, 15): 2.0,  # Ring
-    (0, 16): 8.0,
-    (16, 17): 4.0,
-    (17, 18): 2.5,
-    (18, 19): 2.0,  # Pinky
-}
-
-
-def fix_hand_landmarks_anatomy(joints: List[np.ndarray]) -> List[np.ndarray]:
-    """
-    Normalize bone lengths of hand landmarks (non-batched, NumPy version) so that it becomes more anatomically correct.
-    Returns normalized hand joints
-
-    Input:
-        joints: (20, 3) array of hand joint coordinates
-    Output:
-        (20, 3) array with normalized bone lengths
-    """
-    fixed = normalize_hand(joints)
-
-    for p, c in BONE_LENGTHS:
-        vec = joints[c] - joints[p]  # (3,)
-        length = np.linalg.norm(vec)
-        if length > 0:
-            direction = vec / length
-        else:
-            direction = np.zeros(3)
-        target_length = BONE_LENGTHS[(p, c)]
-        fixed[c] = fixed[p] + direction * target_length
-
-    return normalize_hand(fixed)
-
 
 def normalize_hand(hand_3d_points: List[np.ndarray]) -> List[np.ndarray]:
     """
