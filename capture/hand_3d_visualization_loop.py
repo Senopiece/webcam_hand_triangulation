@@ -3,18 +3,13 @@ import multiprocessing
 import multiprocessing.synchronize
 import numpy as np
 from typing import Tuple
-import mediapipe as mp
 
-from .kinematics import hand_landmarks_by_angles
 from .hand_normalization import BONE_CONNECTIONS
 from .writer import HandWriter
 from .projection import compute_sphere_rotating_camera_projection_matrix, project
 from .finalizable_queue import EmptyFinalized, FinalizableQueue
 from .fps_counter import FPSCounter
 from .draw_utils import draw_left_top, draw_right_bottom
-
-
-mp_hands = mp.solutions.hands  # type: ignore
 
 
 def hand_3d_visualization_loop(
@@ -109,25 +104,14 @@ def hand_3d_visualization_loop(
     while True:
         try:
             result = hand_points_queue.get()
-            hand_data, coupling_fps = result
+            hand_points, coupling_fps = result
         except EmptyFinalized:
             break
-
-        hand_points = None
-        if hand_data is not None:
-            if isinstance(hand_data, np.ndarray):
-                hand_points = hand_landmarks_by_angles(hand_data)
-            else:
-                hand_points = hand_data
 
         if hand_points is not None:
             hand_points = np.vstack(hand_points, dtype=np.float32)  # type: ignore
 
-            # Write to the dataset only if raw landmarks are streamed
-            if not isinstance(hand_data, np.ndarray):
-                writer.add(hand_points)
-
-            # Filter thresholding
+            # Filter by thresholding
             if last_hand_pos is not None:
                 distances = np.linalg.norm(hand_points - last_hand_pos, axis=1)
                 mask = distances > threshold
@@ -148,6 +132,9 @@ def hand_3d_visualization_loop(
                 last_hand_pos = hand_points
 
             hand_points = last_hand_pos
+
+            # Write dataset
+            writer.add(hand_points)
 
             # Unnormalize for visualization
             hand_points = hand_points * 70
