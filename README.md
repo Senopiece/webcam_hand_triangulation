@@ -1,3 +1,5 @@
+# This branch is dead end - using gradient descent for inverse kinematics is too slow
+
 ## Main Usage Scenario
 
 > NOTE: using python 3.11
